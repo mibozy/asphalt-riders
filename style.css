@@ -177,3 +177,30 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 .mine .chk{background:var(--red);border-color:var(--red);color:#fff}
 .poll-op .cnt{margin-left:auto;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion:no-preference){.card{animation:in .25s ease}@keyframes in{from{transform:translateY(4px);opacity:.6}}}
+/* ===== v2 ===== */
+.av{position:relative;overflow:visible}
+.av img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.av .cevrim{position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;background:var(--ok);border:2px solid var(--panel)}
+.av.buyuk{width:64px!important;height:64px!important;font-size:20px!important}
+.ring .av{overflow:hidden}
+.onl{color:var(--ok);font-weight:600}
+.onlist{display:flex;flex-wrap:wrap;gap:10px}
+.onkisi{display:flex;flex-direction:column;align-items:center;gap:2px;width:52px}
+.onkisi small{font-size:11px;color:var(--muted);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.yetkiler{display:flex;flex-wrap:wrap;gap:6px}
+.ytk{font-size:12px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:99px;padding:5px 10px;cursor:pointer}
+.ytk.on{background:rgba(63,174,106,.15);border-color:#2b6e46;color:#9ff0bd}
+.mention{color:#7fc8ff;font-weight:600}
+.mention.ben{color:#ffd36e;background:rgba(255,211,110,.12);border-radius:4px;padding:0 2px}
+.bub.bahsben{box-shadow:inset 3px 0 0 #ffd36e}
+.mrow.parla .bub{outline:2px solid #ffd36e;transition:outline .3s}
+.bahsgit{position:fixed;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(96px + env(safe-area-inset-bottom,0px));width:46px;height:46px;border-radius:50%;border:0;background:#ffd36e;color:#111;font-size:22px;font-weight:700;cursor:pointer;z-index:7;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+.oneriler{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow-y:auto}
+.oneriler:empty{display:none}
+.oneri{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer;text-align:left;color:var(--fg)}
+.oneri .av{width:30px;height:30px;font-size:11px}
+.oneri small{color:var(--muted)}
+.linkbtn{background:none;border:0;color:#ff7b80;text-decoration:underline;cursor:pointer;align-self:center;padding:4px}
+.unr.bahs{background:#ffd36e;color:#111}
+.bilcard{border-color:var(--red-d)}
+.st .plus{border:2px solid var(--bg)}

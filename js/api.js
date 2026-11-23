@@ -9,7 +9,8 @@ const AYAR = {
   url: "https://tqzbdxhrocflizwzpmeg.supabase.co",
   key: "sb_publishable_oubmFqITUbOceb3WRfdggQ_fueFCoC1",
   epostaUzanti: "@asphalt-riders.app",
-  genelSohbet: "00000000-0000-0000-0000-000000000001"
+  genelSohbet: "00000000-0000-0000-0000-000000000001",
+  fonksiyon: "https://tqzbdxhrocflizwzpmeg.supabase.co/functions/v1/asphalt"
 };
 
 const API = (() => {
@@ -20,10 +21,19 @@ const API = (() => {
     if (/already registered|already exists|duplicate key.*username/i.test(m)) return "Bu kullanıcı adı alınmış.";
     if (/Password should be/i.test(m)) return "Şifre en az 6 karakter olmalı.";
     if (/rate limit/i.test(m)) return "Çok fazla deneme yapıldı, biraz bekle.";
+    if (/iletisim_eposta_check|violates check/i.test(m)) return "Geçerli bir e-posta adresi yaz.";
+    if (/row-level security|Yetki yok/i.test(m)) return "Bu işlem için yetkin yok.";
     return m;
   }
   const eposta = u => u.trim().toLowerCase() + AYAR.epostaUzanti;
-  let benId = null;
+  let benId = null, kurtarma = false, kurtarmaCb = null;
+  sb.auth.onAuthStateChange(ev => { if (ev === "PASSWORD_RECOVERY") { kurtarma = true; kurtarmaCb && kurtarmaCb(); } });
+  async function fonksiyon(islem, veri = {}, yetkili = false) {
+    const h = { "Content-Type": "application/json" };
+    if (yetkili) { const { data } = await sb.auth.getSession(); h.Authorization = "Bearer " + data.session?.access_token; }
+    const r = await fetch(AYAR.fonksiyon, { method: "POST", headers: h, body: JSON.stringify({ islem, ...veri }) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.hata || "Sunucu hatası"); return j;
+  }
 
   return {
     /* ---- Oturum ---- */
@@ -31,12 +41,17 @@ const API = (() => {
     async giris(username, sifre) { const d = ok(await sb.auth.signInWithPassword({ email: eposta(username), password: sifre })); benId = d.user.id; return benId; },
     async kayit(f) {
       const d = ok(await sb.auth.signUp({ email: eposta(f.username), password: f.sifre,
-        options: { data: { username: f.username.toLowerCase(), ad: f.ad, motor: f.motor, plaka: f.plaka, tel: f.tel } } }));
+        options: { data: { username: f.username.toLowerCase(), ad: f.ad, motor: f.motor, plaka: f.plaka, tel: f.tel, eposta: f.eposta } } }));
       if (d.user && d.user.identities && d.user.identities.length === 0) throw new Error("Bu kullanıcı adı alınmış.");
       benId = d.user?.id || null; return benId;
     },
     async cikis() { await sb.auth.signOut(); benId = null; },
-    async sifreDegistir(yeni) { ok(await sb.auth.updateUser({ password: yeni })); },
+    async sifreDegistir(yeni) { ok(await sb.auth.updateUser({ password: yeni })); kurtarma = false; },
+    async sifreSifirla(kimlik) { return fonksiyon("sifre", { kimlik }); },
+    kurtarmaModu: () => kurtarma || /type=recovery/.test(location.hash),
+    kurtarmaDinle(cb) { kurtarmaCb = cb; },
+    async topluEposta(konu, metin) { return fonksiyon("toplu", { konu, metin }, true); },
+    async sunucuDurum() { return fonksiyon("durum"); },
 
     /* ---- Üyeler ---- */
     async profiller() { return ok(await sb.from("profiles").select("*").order("created_at")); },
@@ -45,6 +60,25 @@ const API = (() => {
     async uyeOnayla(id) { ok(await sb.rpc("uye_onayla", { uid: id })); },
     async uyeReddet(id) { ok(await sb.rpc("uye_reddet", { uid: id })); },
     async rolDegistir(id, rol) { ok(await sb.rpc("rol_degistir", { uid: id, yeni: rol })); },
+    async yetkiAyarla(id, y) { ok(await sb.rpc("yetki_ayarla", { uid: id, y })); },
+    async sustur(id, durum) { ok(await sb.rpc("uye_sustur", { uid: id, durum })); },
+    async grupAyarla(aciklama, kapali) { ok(await sb.rpc("grup_ayarla", { yeni_aciklama: aciklama, yeni_kapali: kapali })); },
+    async epostam() { const d = ok(await sb.from("iletisim").select("eposta").eq("uid", benId).maybeSingle()); return d?.eposta || ""; },
+    async epostaKaydet(e) { ok(await sb.from("iletisim").upsert({ uid: benId, eposta: e.trim().toLowerCase() })); },
+    async fotoYukle(blob, eski) {
+      const yol = benId + "/foto-" + Date.now() + ".jpg";
+      ok(await sb.storage.from("avatar").upload(yol, blob, { contentType: "image/jpeg" }));
+      ok(await sb.from("profiles").update({ foto: yol }).eq("id", benId));
+      if (eski) await sb.storage.from("avatar").remove([eski]);
+    },
+    async fotoSil(eski) { ok(await sb.from("profiles").update({ foto: null }).eq("id", benId)); if (eski) await sb.storage.from("avatar").remove([eski]); },
+    async fotoUrller(yollar) {
+      if (!yollar.length) return {};
+      const d = ok(await sb.storage.from("avatar").createSignedUrls(yollar, 604800));
+      return Object.fromEntries(d.filter(x => x.signedUrl).map(x => [x.path, x.signedUrl]));
+    },
+    async pushKaydet(endpoint, p256dh, auth) { ok(await sb.from("push_abonelik").upsert({ endpoint, uid: benId, p256dh, auth })); },
+    async pushSil(endpoint) { await sb.from("push_abonelik").delete().eq("endpoint", endpoint); },
 
     /* ---- Duyurular ---- */
     async duyurular() { return ok(await sb.from("duyurular").select("*").order("created_at", { ascending: false }).limit(100)); },
@@ -91,7 +125,7 @@ const API = (() => {
       return ok(await q).reverse();
     },
     async mesaj(id) { return ok(await sb.from("mesajlar").select("*").eq("id", id).maybeSingle()); },
-    async mesajGonder(chatId, sifreli, yanit) { return ok(await sb.from("mesajlar").insert({ chat_id: chatId, sifreli, yanit: yanit || null }).select().single()); },
+    async mesajGonder(chatId, sifreli, yanit, bahsedilen) { return ok(await sb.from("mesajlar").insert({ chat_id: chatId, sifreli, yanit: yanit || null, bahsedilen: bahsedilen || [] }).select().single()); },
     async mesajGuncelle(id, sifreli) { ok(await sb.from("mesajlar").update({ sifreli, updated_at: new Date().toISOString() }).eq("id", id)); },
     async okundu(chatId) { ok(await sb.from("chat_uyeler").update({ son_okuma: new Date().toISOString() }).eq("chat_id", chatId).eq("uid", benId)); },
     async dmAc(uid) { return ok(await sb.rpc("dm_ac", { diger: uid })); },
@@ -118,12 +152,15 @@ const API = (() => {
     },
 
     /* ---- Canlı güncellemeler ---- */
-    canli(degisti, yaziyorGeldi) {
+    canli(degisti, yaziyorGeldi, onlineGeldi) {
       const ch = sb.channel("db");
-      ["mesajlar", "tepkiler", "chat_uyeler", "duyurular", "etkinlikler", "katilim", "anketler", "oylar", "hikayeler", "profiles"]
+      ["mesajlar", "tepkiler", "chat_uyeler", "duyurular", "etkinlikler", "katilim", "anketler", "oylar", "hikayeler", "profiles", "chats"]
         .forEach(t => ch.on("postgres_changes", { event: "*", schema: "public", table: t }, p => degisti(t, p)));
       ch.subscribe();
       const y = sb.channel("yaziyor").on("broadcast", { event: "y" }, p => yaziyorGeldi(p.payload)).subscribe();
+      const on = sb.channel("online", { config: { presence: { key: benId } } });
+      on.on("presence", { event: "sync" }, () => onlineGeldi(Object.keys(on.presenceState())))
+        .subscribe(st => { if (st === "SUBSCRIBED") on.track({ t: Date.now() }); });
       return { yaziyor: (chatId) => y.send({ type: "broadcast", event: "y", payload: { chat: chatId, uid: benId } }) };
     },
     tazele() { sb.realtime.connect(); }
