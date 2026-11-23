@@ -567,5 +567,5 @@ document.addEventListener("visibilitychange", () => {
   gecikmeli("hepsi", async () => { await hepsiniYukle(); if (S.chatOpen) { const c = chatBul(S.chatOpen); c.okuma[S.user.id] = now(); API.okundu(c.id).catch(() => {}); } });
 });
 setInterval(() => { if (S.durum === "hazir" && !S.chatOpen && S.tab === "sohbet") render(); }, 60000);
-if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/OneSignalSDKWorker.js").catch(() => {});
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("OneSignalSDKWorker.js").catch(() => {});
 baslat();

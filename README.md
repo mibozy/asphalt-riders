@@ -8,6 +8,6 @@ Ankara merkezli ASPHALT RIDERS motosiklet grubunun üye uygulaması (PWA).
 - `js/bildirim.js` → OneSignal web push
 - `supabase/schema.sql` → veritabanı şeması
 
-Yayın: Cloudflare Pages (main dalına her gönderimde otomatik).
+Yayın: GitHub Pages → https://mibozy.github.io/asphalt-riders/ (main dalına her gönderimde otomatik).
 
 Made By : İbrahim Boz
