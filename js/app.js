@@ -65,6 +65,7 @@ async function yukleUyeler() {
 async function yukleDuyurular() { S.duyurular = await API.duyurular(); }
 async function yukleEtkinlikler() { S.etkinlikler = (await API.etkinlikler()).map(e => ({ ...e, katilim: Object.fromEntries(e.katilim.map(k => [k.uid, k.durum])) })); }
 async function yukleAnketler() { S.anketler = (await API.anketler()).map(a => ({ ...a, sec: a.secenekler.map((t, i) => ({ t, oy: a.oylar.filter(o => o.secenek === i).map(o => o.uid) })) })); }
+async function yukleEpostalar() { if (S.user.rol !== "kurucu") return; S.epostalar = Object.fromEntries((await API.tumEpostalar()).map(x => [x.uid, x.eposta])); }
 async function yukleAidat() { S.aidat = await API.aidat(); }
 async function yukleHikayeler() {
   const eski = Object.fromEntries(S.hikayeler.map(h => [h.id, h.url]));
@@ -83,13 +84,14 @@ async function yukleSonMesajlar() {
 }
 async function hepsiniYukle() {
   await yukleUyeler();
-  await Promise.allSettled([API.sessizler().then(l => S.sessiz = Object.fromEntries(l.map(x => [x.chat_id, x.bitis ? ms(x.bitis) : Infinity]))),yukleDuyurular(), yukleEtkinlikler(), yukleAnketler(), yukleAidat(), yukleHikayeler(), yukleTepkiler(), yukleSohbetler(), API.epostam().then(e => S.epostam = e), API.gizlenenler().then(l => S.gizli = new Set(l))]).then(r => r.forEach(x => x.status === "rejected" && console.warn(x.reason)));
+  await Promise.allSettled([API.sessizler().then(l => S.sessiz = Object.fromEntries(l.map(x => [x.chat_id, x.bitis ? ms(x.bitis) : Infinity]))),yukleDuyurular(), yukleEtkinlikler(), yukleAnketler(), yukleAidat(), yukleHikayeler(), yukleTepkiler(), yukleSohbetler(), API.epostam().then(e => S.epostam = e), API.gizlenenler().then(l => S.gizli = new Set(l)), yukleEpostalar()]).then(r => r.forEach(x => x.status === "rejected" && console.warn(x.reason)));
   await yukleSonMesajlar().catch(e => console.warn(e));
 }
 
 /* ======================= MESAJ ŞİFRELEME ======================= */
 async function mesajCoz(r) {
-  const c = r.silindi ? null : await Sifre.coz(r.sifreli, S.user.id);
+  const sf = r.sifreli || {};
+  const c = r.silindi ? null : sf.v === 0 ? { icerik: sf.d || {}, anahtar: null } : await Sifre.coz(sf, S.user.id).catch(() => null);
   const m = { id:r.id, chat:r.chat_id, from:r.gonderen, ts:ms(r.created_at), reply:r.yanit, guncel:r.updated_at, bahs:r.bahsedilen || [],
     duzenlendi:!!r.duzenlendi, silinme: r.silinme ? ms(r.silinme) : 0 };
   if (r.silindi) return { ...m, silindi:true, bahs:[] };
@@ -103,11 +105,11 @@ async function medyaHazirla(m) {
   if (medyaCache.has(m.medya.yol)) { m.url = medyaCache.get(m.medya.yol); return; }
   try {
     const blob = await API.indir("medya", m.medya.yol);
-    m.url = URL.createObjectURL(await Sifre.dosyaCoz(blob, m._anahtar, m.medya.iv, m.medya.tip));
+    m.url = URL.createObjectURL(m.medya.acik ? new Blob([blob], { type: m.medya.tip }) : await Sifre.dosyaCoz(blob, m._anahtar, m.medya.iv, m.medya.tip));
     medyaCache.set(m.medya.yol, m.url); render();
   } catch (_) { m.medyaHata = true; render(); }
 }
-function alicilar(c) { return Object.fromEntries(c.uyeler.map(u => [u, uye(u).pubkey]).filter(([, k]) => k)); }
+const paketle = icerik => ({ v: 0, d: icerik });   /* mesaj içeriği (şifresiz, sadece sohbet üyeleri okuyabilir) */
 
 /* ======================= GÖRÜNÜM ======================= */
 const odakGeri = id => { if (!id) return; const el = document.getElementById(id); if (!el || el.type === "file") return; el.focus({ preventScroll:true }); try { const n = el.value.length; el.setSelectionRange(n, n); } catch (_) {} };
@@ -117,6 +119,10 @@ function render() {
   if (S.durum === "giris") { a.innerHTML = loginView(); odakGeri(act); return; }
   if (S.durum === "yenisifre") { a.innerHTML = yeniSifreView(); odakGeri(act); return; }
   if (S.durum === "bekliyor") { a.innerHTML = bekleView(); return; }
+  if (S.durum === "eposta") { a.innerHTML = `<div class="login wrap"><img class="logo" src="${LOGO}" alt="Asphalt Riders logosu"><h2 style="text-align:center">E-posta adresini ekle</h2>
+   <div class="note">Devam etmek için e-posta adresin gerekli. Duyurular, etkinlikler ve şifre yenileme linki buraya gelir. Adresini sadece kurucu görebilir.</div>
+   <form class="form" id="fEpostaZorunlu"><label>E-posta<input id="ez" name="email" type="email" autocomplete="email" autocapitalize="none" required></label>
+   ${S.err?`<div class="err">${esc(S.err)}</div>`:""}<button class="btn pri">Kaydet ve devam et</button></form><button class="btn" id="cikis">Çıkış yap</button><div class="sign">Made By : İbrahim Boz</div></div>`; odakGeri(act); return; }
   if (S.durum === "hata") { a.innerHTML = `<div class="login wrap"><img class="logo" src="${LOGO}" alt="Asphalt Riders logosu"><div class="card"><b>Yüklenirken bir sorun oldu</b><div class="meta">${esc(S.err)}</div></div><button class="btn pri" data-yenile>Tekrar dene</button><button class="btn" id="cikis">Çıkış yap</button><div class="sign">Made By : İbrahim Boz</div></div>`; return; }
   if (S.chatOpen && S.grupBilgi) { a.innerHTML = grupBilgiView(); odakGeri(act); return; }
   if (S.chatOpen) { a.innerHTML = chatView(); odakGeri(act); if (S.scrollBottom) { S.scrollBottom = false; requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight)); } return; }
@@ -246,9 +252,11 @@ function uyelerView() {
     return `<div class="card"><div class="mem">${av(m.id, "", true)}<div class="info">
     <div class="row"><span class="ttl">${esc(m.ad)}</span>${m.rol!=="uye"?`<span class="chip ${m.rol==="kurucu"?"red":""}">${rolAd[m.rol]}</span>`:""}${m.susturuldu?`<span class="chip warn">🔇 Susturuldu</span>`:""}</div>
     <div class="meta">@${esc(m.username)} · ${esc(m.motor)} · <span class="plate">${esc(m.plaka)}</span></div>
-    ${yonetici()?`<div class="meta">${esc(m.tel)}</div>`:""}</div></div>
-    ${S.user.rol==="kurucu"&&m.rol==="yardimci"?`<div class="yetkiler">${Object.entries(YETKI_ADLARI).map(([k, l]) => `<button class="ytk ${y[k]?"on":""}" data-yetki="${m.id}:${k}" aria-pressed="${!!y[k]}">${y[k]?"✓":"✕"} ${l}</button>`).join("")}</div>`:""}
+    ${yonetici()?`<div class="meta">📞 ${esc(m.tel)}</div>`:""}
+    ${S.user.rol==="kurucu"?`<div class="meta">✉️ ${S.epostalar?.[m.id]?esc(S.epostalar[m.id]):"<i>e-posta yok</i>"}</div>`:""}</div></div>
+    ${S.user.rol==="kurucu"&&m.rol==="yardimci"&&S.yetkiAcik===m.id?`<div class="yetkiler">${Object.entries(YETKI_ADLARI).map(([k, l]) => `<button class="ytk ${y[k]?"on":""}" data-yetki="${m.id}:${k}" aria-pressed="${!!y[k]}">${y[k]?"✓":"✕"} ${l}</button>`).join("")}</div>`:""}
     ${m.id!==me?`<div class="row"><button class="btn sm" data-dm="${m.id}">Mesaj gönder</button>
+      ${S.user.rol==="kurucu"&&m.rol==="yardimci"?`<button class="btn sm ${S.yetkiAcik===m.id?"pri":""}" data-yetkiac="${m.id}">⚙️ Yetkiler (${Object.values(y).filter(Boolean).length}/4)</button>`:""}
       ${S.user.rol==="kurucu"&&m.rol!=="kurucu"?`<button class="btn sm" data-rol="${m.id}">${m.rol==="yardimci"?"Yöneticilikten al":"Yönetici yap"}</button>`:""}
       ${yetki("sohbet")&&m.rol!=="kurucu"?`<button class="btn sm" data-sustur="${m.id}">${m.susturuldu?"🔊 Susturmayı kaldır":"🔇 Grupta sustur"}</button>`:""}</div>`:""}</div>`; }).join("")}`;
 }
@@ -290,7 +298,7 @@ function profilView() {
    <input id="tk" placeholder="Konu" required><textarea id="tm" placeholder="Mesaj" required></textarea><button class="btn sm pri">Herkese gönder</button></form>`:""}
   <form class="card form" id="fSifre"><b>Şifre değiştir</b><input id="ys" type="password" minlength="6" autocomplete="new-password" placeholder="Yeni şifre (en az 6 karakter)" required><button class="btn sm">Şifreyi değiştir</button></form>
   <div class="card"><b>Uygulamayı telefona yükle</b><div class="meta">iPhone: Safari'de Paylaş → Ana Ekrana Ekle. Android: Chrome menüsü → Uygulamayı yükle.</div>
-   <div class="meta">🔒 Mesajların şifre anahtarı sadece bu cihazda durur. Telefon değiştirirsen eski mesajlar yeni cihazda okunamaz.</div></div>
+</div>
   <button class="btn" id="cikis">Çıkış yap</button>`;
 }
 
@@ -316,7 +324,7 @@ function metinHtml(t) {
 function onizle(m, c) {
   const me = S.user.id, on = c ? (m.from === me ? "Sen: " : c.tip === "grup" ? uye(m.from).ad.split(" ")[0] + ": " : "") : "";
   if (m.silindi) return esc(on + "🚫 Bu mesaj silindi");
-  if (m.okunamaz) return esc(on + "🔒 Bu cihazda okunamıyor");
+  if (m.okunamaz) return esc(on + "🔒 Eski şifreli mesaj");
   if (m.konum && konumBitti(m)) return esc(on + "📍 Konum süresi doldu");
   const t = (m.text || "").replace(/@([a-zA-Z0-9._]{3,20})/g, (h, u) => { const x = S.members.find(y => y.username === u.toLowerCase()); return x ? "@" + x.ad : h; });
   const ic = m.tur === "foto" ? "📷 Fotoğraf" : m.tur === "ses" ? "🎤 Sesli mesaj (" + sure(m.sn || 0) + ")" : m.konum ? (m.konum.dk ? "📍 Canlı konum" : "📍 Konum") : m.hikayeYaniti ? "↩ Hikayeye yanıt: " + t : t;
@@ -343,7 +351,7 @@ function sohbetView() {
   <div class="clist">${chats.map(c => { const son = gorunur(c).at(-1), n = okunmamis(c), yz = yaziyorKim(c);
     return `<button class="ci" data-chat="${c.id}">${avHtml(c)}<span class="mid"><span class="nm">${esc(chatAd(c))}${c.tip==="grup"&&c.kapali?" 🔒":""}${sessizMi(c.id)?" 🔕":""}<small>${son?saat(son.ts):""}</small></span>
     <span class="pv">${yz?`<span class="typing">yazıyor...</span>`:`<span>${son?onizle(son, c):"Henüz mesaj yok"}</span>`}${bahsVar(c)?`<span class="unr bahs">@</span>`:""}${n?`<span class="unr">${n}</span>`:""}</span></span></button>`; }).join("")}</div>
-  <div class="e2e">🔒 Tüm sohbetler uçtan uca şifreli</div>`;
+`;
 }
 
 function yaziyorKim(c) { const y = S.yaziyor[c.id]; return y && now() - y.t < 3500 && y.uid !== S.user.id ? y.uid : null; }
@@ -357,7 +365,7 @@ function balon(m, c) {
   const me = S.user.id, mine = m.from === me, r = m.reply && c.mesajlar.find(x => x.id === m.reply), k = m.konum, tp = S.tepki[m.id] || {}, vals = Object.values(tp);
   let ic;
   if (m.silindi) ic = `<div class="mtx silindi">🚫 ${mine ? "Bu mesajı sildin" : "Bu mesaj silindi"}</div>`;
-  else if (m.okunamaz) ic = `<div class="mtx" style="color:var(--muted)">🔒 Bu mesaj başka bir cihaz için şifrelenmiş, burada okunamıyor.</div>`;
+  else if (m.okunamaz) ic = `<div class="mtx" style="color:var(--muted)">🔒 Eski şifreli mesaj, bu cihazda açılamıyor.</div>`;
   else ic = `
    ${r?`<div class="quote"><b>${r.from===me?"Sen":esc(uye(r.from).ad)}</b>${onizle(r)}</div>`:""}
    ${m.hikayeYaniti?`<div class="quote"><b>Hikayeye yanıt</b></div>`:""}
@@ -378,7 +386,7 @@ function balon(m, c) {
 function chatView() {
   const c = chatBul(S.chatOpen), me = S.user.id, dr = S.draft[c.id] || "", yz = yaziyorKim(c);
   const alt = yz ? `<small class="typing">${c.tip==="grup"?esc(uye(yz).ad.split(" ")[0])+" ":""}yazıyor...</small>` : `<small>${c.tip==="grup"?(c.kapali?"🔒 Grup kapalı · ":"")+c.uyeler.length+" üye · bilgi için dokun":"@"+esc(uye(c.uyeler.find(x => x !== me)).username||"")}</small>`;
-  const y = S.yanit && msgBul(S.yanit), eksik = c.uyeler.filter(u => !uye(u).pubkey).length;
+  const y = S.yanit && msgBul(S.yanit);
   let alt2;
   if (!yazabilir(c)) alt2 = `${S.secili?eylemMenu(c):""}<div class="note" style="text-align:center">${c.kapali?"🔒 Grup şu an kapalı. Sadece yöneticiler mesaj gönderebilir.":"🔇 Grupta mesaj gönderme yetkin kapatıldı."}</div>`;
   else alt2 = `
@@ -395,10 +403,9 @@ function chatView() {
    <button class="icb" data-sessizmenu aria-label="Bildirim ayarı">${ssz?"🔕":"🔔"}</button></header>
   ${S.sessizMenu?`<div class="wrap" style="padding-block:8px"><div class="card eylem"><b>Bu sohbeti sessize al</b><div class="meta">Bildirimler gelmeye devam eder ama ses ve titreşim olmaz. Senden bahsedilirse yine sesli gelir.</div>
    <div class="sureler">${[[480,"8 saat"],[10080,"1 hafta"],[0,"Her zaman"]].map(([dk, l]) => `<button class="ytk" data-sessiz="${dk}">${l}</button>`).join("")}${ssz?`<button class="ytk on" data-sessiz="kaldir">🔔 Sesi aç</button>`:""}</div></div></div>`:""}
-  <main class="msgs wrap"><div class="e2e">🔒 Mesajlar uçtan uca şifreli. Bu sohbetin dışındaki kimse, yöneticiler dahil, okuyamaz.</div>
+  <main class="msgs wrap">
    ${c.tip==="grup"&&c.aciklama?`<div class="e2e" style="color:var(--fg);border-color:var(--line);background:var(--panel)">${esc(c.aciklama)}</div>`:""}
    ${!c.tam&&c.mesajlar.length>=20?`<button class="btn sm" style="align-self:center" data-eski>Önceki mesajları yükle</button>`:""}
-   ${eksik?`<div class="e2e" style="color:var(--muted)">${eksik} üye uygulamayı henüz açmadığı için şimdilik mesajları göremez.</div>`:""}
    ${gorunur(c).map(m => balon(m, c)).join("")}</main>
   ${S.bahsHedef?`<button class="bahsgit" data-bahsgit aria-label="Senden bahsedilen mesaja git">@</button>`:""}
   <div class="composer"><div class="cin wrap">${alt2}</div></div>`;
@@ -480,11 +487,10 @@ async function gonderMsg(icerik, dosya, chatId = S.chatOpen) {
   if (dosya) gecici.url = URL.createObjectURL(dosya);
   c.mesajlar.push(gecici); S.yanit = null; S.secili = null; S.ekMenu = false; S.scrollBottom = true; render();
   try {
-    const anahtar = await Sifre.yeniAnahtar(), paketIcerik = { ...icerik };
-    if (dosya) { const s = await Sifre.dosyaSifrele(dosya, anahtar);
-      const yol = await API.yukle("medya", Date.now() + "-" + Math.random().toString(36).slice(2), s.blob);
-      paketIcerik.medya = { yol, iv: s.iv, tip: dosya.type }; medyaCache.set(yol, gecici.url); }
-    const { paket } = await Sifre.sifrele(paketIcerik, alicilar(c), anahtar);
+    const paketIcerik = { ...icerik }, anahtar = null;
+    if (dosya) { const yol = await API.yukle("medya", Date.now() + "-" + Math.random().toString(36).slice(2), dosya);
+      paketIcerik.medya = { yol, tip: dosya.type, acik: true }; medyaCache.set(yol, gecici.url); }
+    const paket = paketle(paketIcerik);
     const silinme = icerik.konum?.bitis ? new Date(icerik.konum.bitis).toISOString() : null;
     const r = await API.mesajGonder(chatId, paket, yanit, bahs, silinme);
     const zaten = c.mesajlar.find(m => m.id === r.id);
@@ -500,7 +506,7 @@ async function mesajDuzenle(id, text) {
   const c = chatBul(S.chatOpen), m = msgBul(id); S.duzenle = null;
   if (!m || text === m.text) return render();
   const eski = m.text; m.text = text; m.duzenlendi = true; render();
-  try { const { paket } = await Sifre.sifrele({ text, ...(m.hikayeYaniti ? { hikayeYaniti: true } : {}) }, alicilar(c)); await API.mesajDuzenle(id, paket); toast("Mesaj düzenlendi"); }
+  try { await API.mesajDuzenle(id, paketle({ text, ...(m.hikayeYaniti ? { hikayeYaniti: true } : {}) })); toast("Mesaj düzenlendi"); }
   catch (e) { m.text = eski; render(); toast("⚠️ Düzenlenemedi: " + e.message); }
 }
 
@@ -512,7 +518,7 @@ function canliKonumBasla(m) {
     konumAl(async (lat, lng) => {
       if (!S.canliKonum[m.id]) return;
       m.konum = { ...m.konum, lat, lng }; m.guncel = new Date().toISOString();
-      const { paket } = await Sifre.sifrele({ konum: m.konum }, alicilar(c));
+      const paket = paketle({ konum: m.konum });
       API.mesajGuncelle(m.id, paket).catch(() => {});
     });
   }, 30000);
@@ -521,7 +527,7 @@ function canliKonumBasla(m) {
 async function canliKonumDurdur(m) {
   clearInterval(S.canliKonum[m.id]); delete S.canliKonum[m.id];
   m.konum = { ...m.konum, bitis: now() };
-  const { paket } = await Sifre.sifrele({ konum: m.konum }, alicilar(chatBul(m.chat)));
+  const paket = paketle({ konum: m.konum });
   await API.mesajGuncelle(m.id, paket); render();
 }
 function konumAl(cb, hata = () => {}) {
@@ -637,6 +643,7 @@ document.addEventListener("click", e => {
   if (d.red) return dene(async () => { await API.uyeReddet(d.red); await yukleUyeler(); render(); }, "Başvuru reddedildi");
   if (d.rol) { const m = uye(d.rol), yeni = m.rol === "yardimci" ? "uye" : "yardimci";
     return dene(async () => { await API.rolDegistir(m.id, yeni); await yukleUyeler(); render(); }, yeni === "yardimci" ? "Yönetici yapıldı (tüm yetkiler açık)" : "Yöneticilikten alındı"); }
+  if (d.yetkiac) { S.yetkiAcik = S.yetkiAcik === d.yetkiac ? null : d.yetkiac; return render(); }
   if (d.yetki) { const [uid, k] = d.yetki.split(":"), m = uye(uid), y = { ...(m.yetkiler || {}) }; y[k] = !y[k]; m.yetkiler = y; render();
     return dene(async () => { await API.yetkiAyarla(uid, y); await yukleUyeler(); render(); }); }
   if (d.sustur) { const m = uye(d.sustur), yeni = !m.susturuldu;
@@ -737,6 +744,8 @@ document.addEventListener("submit", async e => {
     try { await API.sifreSifirla(k); S.bilgi = "Bu bilgiyle kayıtlı bir hesap varsa e-postana yenileme linki gönderdik. Gelmezse spam klasörüne bak."; S.loginMode = "giris"; }
     catch (er) { S.err = er.message; }
     S.mesgul = false; return render(); }
+  if (f === "fEpostaZorunlu") { const ep = v("ez");
+    try { await API.epostaKaydet(ep); S.epostam = ep.toLowerCase(); S.err = ""; toast("E-posta kaydedildi"); return baslat(); } catch (er) { S.err = er.message; return render(); } }
   if (f === "fYeniSifre") { const a = $("#ns").value, b = $("#ns2").value; if (a !== b) { S.err = "Şifreler aynı değil."; return render(); }
     try { await API.sifreDegistir(a); S.err = ""; history.replaceState(null, "", location.pathname); toast("Şifren yenilendi"); return baslat(); } catch (er) { S.err = er.message; return render(); } }
   if (S.durum !== "hazir") return;
@@ -801,14 +810,13 @@ async function baslat() {
     if (API.kurtarmaModu()) { S.durum = "yenisifre"; return render(); }
     S.user = await API.profilim();
     if (!S.user.onay) { S.durum = "bekliyor"; render(); clearTimeout(baslat.t); baslat.t = setTimeout(baslat, 20000); return; }
-    const acik = await Sifre.hazirla(uid);
-    if (!Sifre.ayni(acik, S.user.pubkey)) await API.profilGuncelle({ pubkey: acik });
+    try { const acik = await Sifre.hazirla(uid); if (!Sifre.ayni(acik, S.user.pubkey)) await API.profilGuncelle({ pubkey: acik }); } catch (_) {}
     await hepsiniYukle();
+    if (!S.epostam) { S.durum = "eposta"; S.err = ""; return render(); }
     S.durum = "hazir"; render();
     if (!Canli) Canli = API.canli(degisti, yaziyorGeldi, onlineGeldi);
     Bildirim.giris();
     API.eskiHikayelerimiTemizle().catch(() => {});
-    if (Sifre.kalici === false) toast("⚠️ Bu tarayıcı veri saklamaya izin vermiyor (gizli sekme?). Mesajlar çıkışta okunamaz hale gelir.");
   } catch (e) { console.error(e); S.err = e.message || "Bilinmeyen hata"; S.durum = (await API.oturum().catch(() => null)) ? "hata" : "giris"; render(); }
 }
 API.kurtarmaDinle(() => { if (S.durum !== "yenisifre") { S.durum = "yenisifre"; render(); } });

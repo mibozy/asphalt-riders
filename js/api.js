@@ -77,6 +77,7 @@ const API = (() => {
     async sustur(id, durum) { ok(await sb.rpc("uye_sustur", { uid: id, durum })); },
     async grupAyarla(aciklama, kapali) { ok(await sb.rpc("grup_ayarla", { yeni_aciklama: aciklama, yeni_kapali: kapali })); },
     async epostam() { const d = ok(await sb.from("iletisim").select("eposta").eq("uid", benId).maybeSingle()); return d?.eposta || ""; },
+    async tumEpostalar() { return ok(await sb.from("iletisim").select("uid, eposta")); },
     async epostaKaydet(e) { ok(await sb.from("iletisim").upsert({ uid: benId, eposta: e.trim().toLowerCase() })); },
     async fotoYukle(blob, eski) {
       const yol = benId + "/foto-" + Date.now() + ".jpg";
