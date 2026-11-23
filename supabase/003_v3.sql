@@ -56,3 +56,12 @@ begin
   insert into chat_uyeler(chat_id, uid) values (c, auth.uid()), (c, diger) on conflict do nothing;
   return c;
 end $$;
+
+-- v4: e-postayla giriş + sohbet sessize alma
+create or replace function public.giris_kullanici(kimlik text) returns text language sql stable security definer set search_path=public as $$
+  select p.username from profiles p join iletisim i on i.uid = p.id where i.eposta = lower(trim(kimlik)) limit 1 $$;
+revoke all on function public.giris_kullanici(text) from public;
+grant execute on function public.giris_kullanici(text) to anon, authenticated;
+create table if not exists public.sessiz (uid uuid references profiles on delete cascade default auth.uid(), chat_id uuid references chats on delete cascade, bitis timestamptz, primary key (uid, chat_id));
+alter table sessiz enable row level security;
+create policy "kendi" on sessiz for all to authenticated using (uid = auth.uid()) with check (uid = auth.uid());

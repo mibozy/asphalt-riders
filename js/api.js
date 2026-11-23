@@ -13,6 +13,11 @@ const AYAR = {
   fonksiyon: "https://tqzbdxhrocflizwzpmeg.supabase.co/functions/v1/asphalt"
 };
 
+/* Kullanıcı adını standartlaştır: Türkçe klavye (İ/ı/ş...), büyük harf, boşluk, baştaki @ */
+const kadiDuzelt = s => String(s || "").trim().replace(/^@/, "").replace(/[İIı]/g, "i").toLowerCase()
+  .replace(/ç/g, "c").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ö/g, "o").replace(/ü/g, "u")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "");
+
 const API = (() => {
   const sb = supabase.createClient(AYAR.url, AYAR.key, { auth: { persistSession: true, autoRefreshToken: true } });
   const ok = ({ data, error }) => { if (error) throw new Error(hataCevir(error.message)); return data; };
@@ -25,7 +30,7 @@ const API = (() => {
     if (/row-level security|Yetki yok/i.test(m)) return "Bu işlem için yetkin yok.";
     return m;
   }
-  const eposta = u => u.trim().toLowerCase() + AYAR.epostaUzanti;
+  const eposta = u => kadiDuzelt(u) + AYAR.epostaUzanti;
   let benId = null, kurtarma = false, kurtarmaCb = null;
   sb.auth.onAuthStateChange(ev => { if (ev === "PASSWORD_RECOVERY") { kurtarma = true; kurtarmaCb && kurtarmaCb(); } });
   async function fonksiyon(islem, veri = {}, yetkili = false) {
@@ -38,10 +43,18 @@ const API = (() => {
   return {
     /* ---- Oturum ---- */
     async oturum() { const { data } = await sb.auth.getSession(); benId = data.session?.user.id || null; return benId; },
-    async giris(username, sifre) { const d = ok(await sb.auth.signInWithPassword({ email: eposta(username), password: sifre })); benId = d.user.id; return benId; },
+    async giris(kimlik, sifre) {
+      let kadi = kimlik.trim();
+      if (kadi.includes("@") && !kadi.startsWith("@")) {   // e-posta ile giriş
+        const { data } = await sb.rpc("giris_kullanici", { kimlik: kadi.toLowerCase() });
+        if (!data) throw new Error("Bu e-postayla kayıtlı üye bulunamadı. Kullanıcı adınla dene.");
+        kadi = data;
+      }
+      const d = ok(await sb.auth.signInWithPassword({ email: eposta(kadi), password: sifre })); benId = d.user.id; return benId;
+    },
     async kayit(f) {
       const d = ok(await sb.auth.signUp({ email: eposta(f.username), password: f.sifre,
-        options: { data: { username: f.username.toLowerCase(), ad: f.ad, motor: f.motor, plaka: f.plaka, tel: f.tel, eposta: f.eposta } } }));
+        options: { data: { username: kadiDuzelt(f.username), ad: f.ad, motor: f.motor, plaka: f.plaka, tel: f.tel, eposta: f.eposta } } }));
       if (d.user && d.user.identities && d.user.identities.length === 0) throw new Error("Bu kullanıcı adı alınmış.");
       benId = d.user?.id || null; return benId;
     },
@@ -129,6 +142,11 @@ const API = (() => {
     async mesajDuzenle(id, sifreli) { ok(await sb.from("mesajlar").update({ sifreli, duzenlendi: true, updated_at: new Date().toISOString() }).eq("id", id)); },
     async herkestenSil(id) { ok(await sb.rpc("mesaj_herkesten_sil", { mid: id })); },
     async bendenSil(id) { ok(await sb.from("gizlenen").upsert({ uid: benId, mesaj_id: id })); },
+    async sessizler() { return ok(await sb.from("sessiz").select("chat_id, bitis")); },
+    async sessizAyarla(chatId, bitis) {
+      if (bitis === false) return ok(await sb.from("sessiz").delete().eq("chat_id", chatId).eq("uid", benId));
+      ok(await sb.from("sessiz").upsert({ uid: benId, chat_id: chatId, bitis }));
+    },
     async gizlenenler() { return ok(await sb.from("gizlenen").select("mesaj_id")).map(x => x.mesaj_id); },
     async mesajGuncelle(id, sifreli) { ok(await sb.from("mesajlar").update({ sifreli, updated_at: new Date().toISOString() }).eq("id", id)); },
     async okundu(chatId) { ok(await sb.from("chat_uyeler").update({ son_okuma: new Date().toISOString() }).eq("chat_id", chatId).eq("uid", benId)); },

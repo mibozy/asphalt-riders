@@ -36,12 +36,13 @@ const Sifre = (() => {
   return {
     /* Bu cihazın anahtarını yükler, yoksa üretir. Sunucuya gidecek açık anahtarı döner. */
     async hazirla(uid) {
-      let kayit = await idb("al", uid);
+      let kayit = null; this.kalici = true;
+      try { kayit = await idb("al", uid); } catch (_) { this.kalici = false; }
       if (!kayit) {
         const cift = await C.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
         const jwk = await C.exportKey("jwk", cift.publicKey);
         kayit = { ozel: cift.privateKey, acik: { x: jwk.x, y: jwk.y } };
-        await idb("koy", uid, kayit);
+        try { await idb("koy", uid, kayit); } catch (_) { this.kalici = false; }
       }
       ozel = kayit.ozel; acikJwk = kayit.acik; ortakOnbellek.clear();
       return acikJwk;

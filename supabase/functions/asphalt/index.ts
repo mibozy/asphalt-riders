@@ -22,12 +22,15 @@ const kisalt = (t: string, n = 140) => (t || "").length > n ? t.slice(0, n - 1) 
 /* Aynı olay için ikinci kez bildirim gitmesin */
 async function ilkKez(anahtar: string) { const { error } = await sb.from("bildirim_log").insert({ anahtar }); return !error; }
 
-async function pushGonder(uids: string[], b: { baslik: string; govde: string; url?: string; tag?: string }) {
+type Bil = { baslik: string; govde: string; url?: string; tag?: string; sessiz?: boolean; sifreli?: unknown; on?: string };
+/* ek(uid): alıcıya özel alanlar (şifreli içerik, sessiz) */
+async function pushGonder(uids: string[], b: Bil, ek?: (uid: string) => Partial<Bil>) {
   if (!VAPID_PRIVATE || !uids.length) return 0;
   const { data: abo } = await sb.from("push_abonelik").select("*").in("uid", uids);
-  const yuk = JSON.stringify({ title: b.baslik, body: b.govde, url: b.url || SITE, tag: b.tag || "ar" });
   let n = 0;
   await Promise.all((abo || []).map(async a => {
+    const x = { ...b, ...(ek ? ek(a.uid) : {}) };
+    const yuk = JSON.stringify({ title: x.baslik, body: x.govde, url: x.url || SITE, tag: x.tag || "ar", sessiz: !!x.sessiz, sifreli: x.sifreli, on: x.on || "", uid: a.uid });
     try { await webpush.sendNotification({ endpoint: a.endpoint, keys: { p256dh: a.p256dh, auth: a.auth } }, yuk, { TTL: 86400, urgency: "high" }); n++; }
     catch (e) { const s = (e as { statusCode?: number }).statusCode; if (s === 404 || s === 410) await sb.from("push_abonelik").delete().eq("endpoint", a.endpoint); }
   }));
@@ -75,14 +78,20 @@ async function bildir(tablo: string, id: number) {
   }
   if (tablo === "anketler") return { p: await pushGonder(digerleri, { baslik: "📊 Yeni anket", govde: r.soru, tag: "anket-" + id }) };
 
-  // mesajlar: içerik şifreli, bildirimde gösterilmez
+  // mesajlar: içerik uçtan uca şifreli. Her alıcıya sadece kendi anahtarıyla şifreli kopya gider, telefonda açılır.
+  if (r.silindi) return { silindi: true };
   const { data: uy } = await sb.from("chat_uyeler").select("uid").eq("chat_id", r.chat_id);
+  const { data: ss } = await sb.from("sessiz").select("uid, bitis").eq("chat_id", r.chat_id);
+  const sessizler = new Set((ss || []).filter(x => !x.bitis || new Date(x.bitis).getTime() > Date.now()).map(x => x.uid));
+  const sif = r.sifreli || {}, kucuk = String(sif.ct || "").length < 2600;
+  const ek = (uid: string) => ({ sessiz: sessizler.has(uid) && !(r.bahsedilen || []).includes(uid),
+    sifreli: kucuk && sif.keys?.[uid] ? { iv: sif.iv, ct: sif.ct, spk: sif.spk, k: sif.keys[uid] } : undefined });
   const { data: ch } = await sb.from("chats").select("tip, ad").eq("id", r.chat_id).single();
   const alicilar = (uy || []).map(x => x.uid).filter(u => u !== r.gonderen);
   const bahs = (r.bahsedilen || []).filter((u: string) => alicilar.includes(u)), kim = ad(r.gonderen);
   const grupAd = ch?.tip === "grup" ? (ch.ad || "ASPHALT RIDERS") : kim;
-  const p1 = await pushGonder(bahs, { baslik: "@ " + kim + " senden bahsetti", govde: ch?.tip === "grup" ? grupAd : "Özel mesaj", tag: "bahs-" + id });
-  const p2 = await pushGonder(alicilar.filter((u: string) => !bahs.includes(u)), { baslik: grupAd, govde: ch?.tip === "grup" ? kim + ": 🔒 yeni mesaj" : "🔒 Yeni mesaj", tag: "sohbet-" + r.chat_id });
+  const p1 = await pushGonder(bahs, { baslik: "@ " + kim + " senden bahsetti" + (ch?.tip === "grup" ? " · " + grupAd : ""), govde: "Yeni mesaj", tag: "bahs-" + id }, ek);
+  const p2 = await pushGonder(alicilar.filter((u: string) => !bahs.includes(u)), { baslik: grupAd, govde: ch?.tip === "grup" ? kim + ": Yeni mesaj" : "Yeni mesaj", tag: "sohbet-" + r.chat_id, on: ch?.tip === "grup" ? kim + ": " : "" }, ek);
   return { p: p1 + p2 };
 }
 
