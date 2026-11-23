@@ -92,14 +92,16 @@ async function bildir(tablo: string, id: number) {
   const sessizler = new Set((ss || []).filter(x => !x.bitis || new Date(x.bitis).getTime() > Date.now()).map(x => x.uid));
   const sif = r.sifreli || {}, kucuk = String(sif.ct || "").length < 2600;
   const duz = sif.v === 0 ? ozet(sif.d || {}) : null;   // şifresiz mesaj: içerik bildirimde doğrudan görünür
-  const ek = (uid: string) => ({ sessiz: sessizler.has(uid) && !(r.bahsedilen || []).includes(uid),
+  const ek = (uid: string) => ({ sessiz: false,
     sifreli: kucuk && sif.keys?.[uid] ? { iv: sif.iv, ct: sif.ct, spk: sif.spk, k: sif.keys[uid] } : undefined });
   const { data: ch } = await sb.from("chats").select("tip, ad").eq("id", r.chat_id).single();
   const alicilar = (uy || []).map(x => x.uid).filter(u => u !== r.gonderen);
-  const bahs = (r.bahsedilen || []).filter((u: string) => alicilar.includes(u)), kim = ad(r.gonderen);
+  // @herkes (sadece yönetici/kurucu, veritabanı kontrol ediyor) tüm üyelere sesli gider; sessize alanlar dahil
+  const bahs = r.herkes ? alicilar : (r.bahsedilen || []).filter((u: string) => alicilar.includes(u)), kim = ad(r.gonderen);
   const grupAd = ch?.tip === "grup" ? (ch.ad || "ASPHALT RIDERS") : kim;
-  const p1 = await pushGonder(bahs, { baslik: "@ " + kim + " senden bahsetti" + (ch?.tip === "grup" ? " · " + grupAd : ""), govde: duz || "Yeni mesaj", tag: "bahs-" + id }, ek);
-  const p2 = await pushGonder(alicilar.filter((u: string) => !bahs.includes(u)), { baslik: grupAd, govde: (ch?.tip === "grup" ? kim + ": " : "") + (duz || "Yeni mesaj"), tag: "sohbet-" + r.chat_id, on: ch?.tip === "grup" && !duz ? kim + ": " : "" }, ek);
+  const p1 = await pushGonder(bahs, { baslik: (r.herkes ? "📣 " + kim + " herkesten bahsetti" : "@ " + kim + " senden bahsetti") + (ch?.tip === "grup" ? " · " + grupAd : ""), govde: duz || "Yeni mesaj", tag: "bahs-" + id }, ek);
+  // Sohbeti sessize alanlara normal mesaj bildirimi hiç gitmez
+  const p2 = await pushGonder(alicilar.filter((u: string) => !bahs.includes(u) && !sessizler.has(u)), { baslik: grupAd, govde: (ch?.tip === "grup" ? kim + ": " : "") + (duz || "Yeni mesaj"), tag: "sohbet-" + r.chat_id, on: ch?.tip === "grup" && !duz ? kim + ": " : "" }, ek);
   return { p: p1 + p2 };
 }
 

@@ -227,3 +227,7 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 .lbalan{flex:1;min-height:0;display:grid;place-items:center;overflow:hidden;touch-action:none}
 .lbalan img{max-width:100%;max-height:100%;object-fit:contain;transform-origin:center;transition:transform .05s linear;user-select:none}
 .lbalt{text-align:center;padding:8px 8px calc(env(safe-area-inset-bottom,0px) + 10px)}
+/* ===== v6: hikaye dokun/kaydır ===== */
+.sv{touch-action:none;user-select:none;-webkit-user-select:none}
+.sv>img{pointer-events:none}
+.oneri .av{display:grid;place-items:center;font-size:16px}

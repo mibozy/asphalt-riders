@@ -65,3 +65,12 @@ grant execute on function public.giris_kullanici(text) to anon, authenticated;
 create table if not exists public.sessiz (uid uuid references profiles on delete cascade default auth.uid(), chat_id uuid references chats on delete cascade, bitis timestamptz, primary key (uid, chat_id));
 alter table sessiz enable row level security;
 create policy "kendi" on sessiz for all to authenticated using (uid = auth.uid()) with check (uid = auth.uid());
+
+-- v6: @herkes (sadece yönetici/kurucu, grup sohbetinde)
+alter table mesajlar add column if not exists herkes boolean not null default false;
+create or replace function public.herkes_kontrol() returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  if new.herkes and not (public.yonetici() and exists(select 1 from chats where id = new.chat_id and tip = 'grup')) then new.herkes := false; end if;
+  return new;
+end $$;
+create trigger herkes_kontrol before insert on mesajlar for each row execute function public.herkes_kontrol();

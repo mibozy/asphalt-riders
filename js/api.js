@@ -139,7 +139,7 @@ const API = (() => {
       return ok(await q).reverse();
     },
     async mesaj(id) { return ok(await sb.from("mesajlar").select("*").eq("id", id).maybeSingle()); },
-    async mesajGonder(chatId, sifreli, yanit, bahsedilen, silinme) { return ok(await sb.from("mesajlar").insert({ chat_id: chatId, sifreli, yanit: yanit || null, bahsedilen: bahsedilen || [], silinme: silinme || null }).select().single()); },
+    async mesajGonder(chatId, sifreli, yanit, bahsedilen, silinme, herkes) { return ok(await sb.from("mesajlar").insert({ chat_id: chatId, sifreli, yanit: yanit || null, bahsedilen: bahsedilen || [], silinme: silinme || null, herkes: !!herkes }).select().single()); },
     async mesajDuzenle(id, sifreli) { ok(await sb.from("mesajlar").update({ sifreli, duzenlendi: true, updated_at: new Date().toISOString() }).eq("id", id)); },
     async herkestenSil(id) { ok(await sb.rpc("mesaj_herkesten_sil", { mid: id })); },
     async bendenSil(id) { ok(await sb.from("gizlenen").upsert({ uid: benId, mesaj_id: id })); },

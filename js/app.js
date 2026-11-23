@@ -93,7 +93,7 @@ async function mesajCoz(r) {
   const sf = r.sifreli || {};
   const c = r.silindi ? null : sf.v === 0 ? { icerik: sf.d || {}, anahtar: null } : await Sifre.coz(sf, S.user.id).catch(() => null);
   const m = { id:r.id, chat:r.chat_id, from:r.gonderen, ts:ms(r.created_at), reply:r.yanit, guncel:r.updated_at, bahs:r.bahsedilen || [],
-    duzenlendi:!!r.duzenlendi, silinme: r.silinme ? ms(r.silinme) : 0 };
+    duzenlendi:!!r.duzenlendi, silinme: r.silinme ? ms(r.silinme) : 0, herkes: !!r.herkes };
   if (r.silindi) return { ...m, silindi:true, bahs:[] };
   if (!c) return { ...m, okunamaz:true };
   Object.assign(m, c.icerik); m._anahtar = c.anahtar;
@@ -308,7 +308,8 @@ const chatAd = c => c.tip === "grup" ? (c.ad || "ASPHALT RIDERS") : uye(c.uyeler
 const gorunur = c => c.mesajlar.filter(m => !S.gizli.has(m.id) && !(m.silinme && m.silinme < now()));
 const konumBitti = m => m.konum && m.konum.bitis && m.konum.bitis < now();
 const okunmamis = c => gorunur(c).filter(m => m.from !== S.user.id && m.ts > (c.okuma[S.user.id] || 0)).length;
-const bahsVar = c => c.mesajlar.some(m => m.from !== S.user.id && m.ts > (c.okuma[S.user.id] || 0) && (m.bahs || []).includes(S.user.id));
+const banaBahs = m => m.from !== S.user.id && (m.herkes || (m.bahs || []).includes(S.user.id));
+const bahsVar = c => c.mesajlar.some(m => m.ts > (c.okuma[S.user.id] || 0) && banaBahs(m));
 const benimChatler = () => S.chats.filter(c => c.uyeler.includes(S.user.id));
 const avHtml = (c, halka) => c.tip === "grup" ? `<span class="av"><img src="${LOGO}" alt=""></span>` : av(c.uyeler.find(x => x !== S.user.id) || S.user.id, "", halka);
 const aktifHikayeler = () => S.hikayeler.filter(h => now() - ms(h.ts) < 864e5);
@@ -317,6 +318,7 @@ const yazabilir = c => c.tip !== "grup" || yetki("sohbet") || (!c.kapali && !S.u
 
 function metinHtml(t) {
   return esc(t).replace(/@([a-zA-Z0-9._]{3,20})/g, (h, u) => {
+    if (u.toLowerCase() === "herkes") return `<span class="mention ben">@herkes</span>`;
     const m = S.members.find(x => x.username === u.toLowerCase());
     return m ? `<span class="mention ${m.id === S.user.id ? "ben" : ""}">@${esc(m.ad)}</span>` : h;
   });
@@ -377,7 +379,7 @@ function balon(m, c) {
      <a href="https://www.google.com/maps?q=${+k.lat},${+k.lng}" target="_blank" rel="noopener">Haritada aç</a>
      ${mine&&k.dk?` · <button class="btn sm" data-durdur="${m.id}">Durdur</button>`:""}</div></div>`):""}
    ${m.text?`<div class="mtx">${metinHtml(m.text)}</div>`:""}`;
-  const bahsBen = !mine && (m.bahs || []).includes(me);
+  const bahsBen = banaBahs(m);
   return `<div class="mrow ${mine?"me":""}" id="m${m.id}"><div class="bub ${S.secili===m.id?"sel":""} ${bahsBen?"bahsben":""}" data-msg="${m.id}">
    ${c.tip==="grup"&&!mine?`<div class="snd" style="color:${RENK[Math.max(0, S.members.findIndex(x => x.id === m.from)) % RENK.length]}">${esc(uye(m.from).ad)}</div>`:""}
    ${ic}<div class="mt">${m.duzenlendi&&!m.silindi?"düzenlendi · ":""}${saat(m.ts)}${mine?tik(m, c):""}</div></div>
@@ -401,8 +403,9 @@ function chatView() {
   const ssz = sessizMi(c.id);
   return `<header class="chead wrap"><button class="icb" data-back aria-label="Geri">←</button>${avHtml(c)}<span class="grow" ${c.tip==="grup"?'data-grupbilgi role="button" tabindex="0"':""} style="cursor:${c.tip==="grup"?"pointer":"default"}"><b>${esc(chatAd(c))}${ssz?" 🔕":""}</b>${alt}</span>
    <button class="icb" data-sessizmenu aria-label="Bildirim ayarı">${ssz?"🔕":"🔔"}</button></header>
-  ${S.sessizMenu?`<div class="wrap" style="padding-block:8px"><div class="card eylem"><b>Bu sohbeti sessize al</b><div class="meta">Bildirimler gelmeye devam eder ama ses ve titreşim olmaz. Senden bahsedilirse yine sesli gelir.</div>
-   <div class="sureler">${[[480,"8 saat"],[10080,"1 hafta"],[0,"Her zaman"]].map(([dk, l]) => `<button class="ytk" data-sessiz="${dk}">${l}</button>`).join("")}${ssz?`<button class="ytk on" data-sessiz="kaldir">🔔 Sesi aç</button>`:""}</div></div></div>`:""}
+  ${S.sessizMenu?`<div class="wrap" style="padding-block:8px"><div class="card eylem"><b>${ssz?"🔕 Bu sohbet sessizde":"Bu sohbeti sessize al"}</b><div class="meta">Sessizdeyken bu sohbetten <b>bildirim gelmez</b>. Senden bahsedilen ve @herkes mesajları yine gelir. Bu ayar sadece senin telefonunu etkiler.</div>
+   ${ssz?`<div class="meta">${S.sessiz[c.id]===Infinity?"Süre: her zaman":"Bitiş: "+new Date(S.sessiz[c.id]).toLocaleString("tr-TR",{day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"})}</div>`:""}
+   <div class="sureler">${[[480,"8 saat"],[10080,"1 hafta"],[0,"Her zaman"]].map(([dk, l]) => `<button class="ytk" data-sessiz="${dk}">🔕 ${l}</button>`).join("")}${ssz?`<button class="ytk on" data-sessiz="kaldir">🔔 Bildirimleri aç</button>`:""}</div></div></div>`:""}
   <main class="msgs wrap">
    ${c.tip==="grup"&&c.aciklama?`<div class="e2e" style="color:var(--fg);border-color:var(--line);background:var(--panel)">${esc(c.aciklama)}</div>`:""}
    ${!c.tam&&c.mesajlar.length>=20?`<button class="btn sm" style="align-self:center" data-eski>Önceki mesajları yükle</button>`:""}
@@ -449,7 +452,7 @@ function grupBilgiView() {
 async function openChat(id) {
   const c = chatBul(id), onceki = c.okuma[S.user.id] || 0;
   S.tab = "sohbet"; S.chatOpen = id; S.grupBilgi = false; S.yeniSohbet = false; S.secili = null; S.yanit = null; S.ekMenu = false; S.scrollBottom = true;
-  const hedefBul = () => c.mesajlar.find(m => m.from !== S.user.id && m.ts > onceki && (m.bahs || []).includes(S.user.id))?.id || null;
+  const hedefBul = () => c.mesajlar.find(m => m.ts > onceki && banaBahs(m))?.id || null;
   S.bahsHedef = hedefBul();
   c.okuma[S.user.id] = now(); render();
   API.okundu(id).catch(() => {});
@@ -472,7 +475,8 @@ function oneriGuncelle(input) {
   const q = m[1].toLocaleLowerCase("tr"), c = chatBul(S.chatOpen);
   S.oneri = uyeSirala(S.members.filter(u => u.onay && u.id !== S.user.id && c.uyeler.includes(u.id) &&
     (u.username.startsWith(q) || u.ad.toLocaleLowerCase("tr").split(" ").some(p => p.startsWith(q))))).slice(0, 6);
-  kutu.innerHTML = S.oneri.map(u => `<button class="oneri" data-oneri="${u.username}">${av(u.id)}<span><b>${esc(u.ad)}</b> <small>@${esc(u.username)}</small></span></button>`).join("");
+  const herkes = c.tip === "grup" && yonetici() && "herkes".startsWith(q) ? `<button class="oneri" data-oneri="herkes"><span class="av">📣</span><span><b>@herkes</b> <small>Gruptaki herkese bildirim gider</small></span></button>` : "";
+  kutu.innerHTML = herkes + S.oneri.map(u => `<button class="oneri" data-oneri="${u.username}">${av(u.id)}<span><b>${esc(u.ad)}</b> <small>@${esc(u.username)}</small></span></button>`).join("");
 }
 function bahsedilenler(text, c) {
   const adlar = [...text.matchAll(/@([a-zA-Z0-9._]{3,20})/g)].map(x => x[1].toLowerCase());
@@ -483,7 +487,8 @@ function bahsedilenler(text, c) {
 let geciciId = -1;
 async function gonderMsg(icerik, dosya, chatId = S.chatOpen) {
   const c = chatBul(chatId), yanit = S.yanit, bahs = icerik.text ? bahsedilenler(icerik.text, c) : [];
-  const gecici = { id: geciciId--, chat: chatId, from: S.user.id, ts: now(), bekliyor: true, reply: yanit, bahs, ...icerik, guncel: new Date().toISOString() };
+  const herkes = !!icerik.text && c.tip === "grup" && yonetici() && /(^|\s)@herkes(?![a-z0-9._])/i.test(icerik.text);
+  const gecici = { id: geciciId--, chat: chatId, from: S.user.id, ts: now(), bekliyor: true, reply: yanit, bahs, herkes, ...icerik, guncel: new Date().toISOString() };
   if (dosya) gecici.url = URL.createObjectURL(dosya);
   c.mesajlar.push(gecici); S.yanit = null; S.secili = null; S.ekMenu = false; S.scrollBottom = true; render();
   try {
@@ -492,7 +497,7 @@ async function gonderMsg(icerik, dosya, chatId = S.chatOpen) {
       paketIcerik.medya = { yol, tip: dosya.type, acik: true }; medyaCache.set(yol, gecici.url); }
     const paket = paketle(paketIcerik);
     const silinme = icerik.konum?.bitis ? new Date(icerik.konum.bitis).toISOString() : null;
-    const r = await API.mesajGonder(chatId, paket, yanit, bahs, silinme);
+    const r = await API.mesajGonder(chatId, paket, yanit, bahs, silinme, herkes);
     const zaten = c.mesajlar.find(m => m.id === r.id);
     Object.assign(gecici, { id: r.id, ts: ms(r.created_at), bekliyor: false, medya: paketIcerik.medya, _anahtar: anahtar });
     if (zaten && zaten !== gecici) c.mesajlar.splice(c.mesajlar.indexOf(zaten), 1);
@@ -569,10 +574,10 @@ function kucult(f, cb, max = 1280, kare = false) {
 /* ======================= HİKAYELER ======================= */
 function hikayeSirasi() { const me = S.user.id, ak = aktifHikayeler(), yeni = u => ak.some(h => h.uid === u && !h.goren.includes(me));
   return [...new Set(ak.filter(h => h.uid !== me).map(h => h.uid))].sort((a, b) => yeni(b) - yeni(a)); }
-function hikayeAc(uid) { const me = S.user.id, l = aktifHikayeler().filter(h => h.uid === uid); if (!l.length) return;
+function hikayeAc(uid) { hikayeKisileri(); const me = S.user.id, l = aktifHikayeler().filter(h => h.uid === uid); if (!l.length) return;
   const i = uid === me ? 0 : l.findIndex(h => !h.goren.includes(me)); S.hv = { uid, i: i < 0 ? 0 : i }; hikayeGoster(); }
 async function hikayeGoster() {
-  clearTimeout(S.hvT); const box = $("#storyBox"); if (!S.hv) { box.innerHTML = ""; return; }
+  clearTimeout(S.hvT); S.hvDur = false; const box = $("#storyBox"); if (!S.hv) { box.innerHTML = ""; return; }
   const me = S.user.id, l = aktifHikayeler().filter(h => h.uid === S.hv.uid), h = l[S.hv.i]; if (!h) return hikayeKapat();
   if (!h.goren.includes(me)) { h.goren.push(me); if (h.uid !== me) API.hikayeGordum(h.id); }
   S.hv.cur = h.id;
@@ -581,17 +586,41 @@ async function hikayeGoster() {
    <div class="bars">${l.map((x, j) => `<span><i class="${j<S.hv.i?"full":j===S.hv.i&&h.url?"run":""}"></i></span>`).join("")}</div>
    <div class="svh">${av(h.uid)}<b>${esc(h.uid===me?"Hikayen":u.ad)}</b><small>${once(h.ts)}</small><button class="x" data-svx aria-label="Kapat">✕</button></div>
    ${h.url?`<img src="${h.url}" alt="Hikaye fotoğrafı" draggable="false" oncontextmenu="return false">`:`<div style="flex:1;display:grid;place-items:center">Yükleniyor...</div>`}
-   <button class="tz" data-svp aria-label="Önceki"></button><button class="tz r" data-svn aria-label="Sonraki"></button>
    <div class="svf">${h.uid===me?`<span class="grow">👁 ${gor.length} görüntüleme${gor.length?": "+gor.map(x => esc(uye(x).ad.split(" ")[0])).join(", "):""}</span><button class="btn sm" data-svdel>Sil</button>`
    :`<form id="fSvy" class="row grow" style="flex-wrap:nowrap"><input id="svy" placeholder="${esc(u.ad.split(" ")[0])} kişisine yanıt gönder" autocomplete="off"><button class="send" aria-label="Gönder">➤</button></form>`}</div></div>`;
   if (!h.url) { try { h.url = URL.createObjectURL(await API.indir("hikaye", h.yol)); } catch (_) { return hikayeIleri(); } if (S.hv?.cur === h.id) hikayeGoster(); return; }
-  S.hvT = setTimeout(hikayeIleri, 5000);
+  S.hvBas = now(); S.hvKalan = 5000; S.hvT = setTimeout(hikayeIleri, 5000);
 }
+/* Görüntüleyici açıkken sıra sabit kalır (görülen hikaye sona kaymasın) */
+const hikayeKisileri = () => S.hvSira || (S.hvSira = [...(aktifHikayeler().some(h => h.uid === S.user.id) ? [S.user.id] : []), ...hikayeSirasi()]);
+function hikayeKisiGec(yon) {
+  if (!S.hv) return; const l = hikayeKisileri(), i = l.indexOf(S.hv.uid) + yon;
+  if (i < 0 || i >= l.length) return hikayeKapat();
+  S.hv = { uid: l[i], i: 0 }; if (yon > 0) return hikayeAc(l[i]); hikayeGoster();
+}
+function hikayeDurdur() { if (!S.hv || S.hvDur) return; S.hvDur = true; clearTimeout(S.hvT); S.hvKalan = Math.max(300, S.hvKalan - (now() - S.hvBas)); const b = $(".bars i.run"); if (b) b.style.animationPlayState = "paused"; }
+function hikayeDevam() { if (!S.hv || !S.hvDur) return; S.hvDur = false; S.hvBas = now(); const b = $(".bars i.run"); if (b) b.style.animationPlayState = "running"; S.hvT = setTimeout(hikayeIleri, S.hvKalan); }
+/* Dokun: sağ = sonraki, sol = önceki · Sola/sağa kaydır: sonraki/önceki kişi · Aşağı kaydır: kapat · Basılı tut: durdur */
+(() => {
+  const kutu = document.getElementById("storyBox"); let bas = null;
+  kutu.addEventListener("pointerdown", e => {
+    if (!S.hv || e.target.closest(".svh,.svf")) return;
+    bas = { x: e.clientX, y: e.clientY, t: now() }; hikayeDurdur();
+  });
+  kutu.addEventListener("pointerup", e => {
+    if (!bas) return; const dx = e.clientX - bas.x, dy = e.clientY - bas.y, sure = now() - bas.t; bas = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) return hikayeKisiGec(dx < 0 ? 1 : -1);
+    if (dy > 80 && Math.abs(dy) > Math.abs(dx)) return hikayeKapat();
+    if (sure > 350) return hikayeDevam();
+    S.hvDur = false; return e.clientX > window.innerWidth * 0.35 ? hikayeIleri() : hikayeGeri();
+  });
+  kutu.addEventListener("pointercancel", () => { bas = null; hikayeDevam(); });
+})();
 function hikayeIleri() { if (!S.hv) return; const l = aktifHikayeler().filter(h => h.uid === S.hv.uid);
   if (S.hv.i < l.length - 1) { S.hv.i++; return hikayeGoster(); }
-  const sira = hikayeSirasi(), sonraki = sira[sira.indexOf(S.hv.uid) + 1]; sonraki !== undefined ? hikayeAc(sonraki) : hikayeKapat(); }
-function hikayeGeri() { if (!S.hv) return; if (S.hv.i > 0) S.hv.i--; hikayeGoster(); }
-function hikayeKapat() { clearTimeout(S.hvT); S.hv = null; $("#storyBox").innerHTML = ""; render(); }
+  const sira = hikayeKisileri(), sonraki = sira[sira.indexOf(S.hv.uid) + 1]; sonraki !== undefined ? hikayeAc(sonraki) : hikayeKapat(); }
+function hikayeGeri() { if (!S.hv) return; if (S.hv.i > 0) { S.hv.i--; return hikayeGoster(); } const l = hikayeKisileri(), i = l.indexOf(S.hv.uid); if (i > 0) { S.hv = { uid: l[i - 1], i: 0 }; return hikayeGoster(); } hikayeGoster(); }
+function hikayeKapat() { clearTimeout(S.hvT); S.hvDur = false; S.hvSira = null; S.hv = null; $("#storyBox").innerHTML = ""; render(); }
 
 /* ======================= FOTOĞRAF GÖRÜNTÜLEYİCİ (yakınlaştır, kaydır, indir) ======================= */
 function fotoAc(url, ad) {
@@ -681,9 +710,9 @@ document.addEventListener("click", e => {
     return konumAl((lat, lng) => gonderMsg({ konum: { lat, lng, dk: tur === "canli" ? sure : 0, sure, bitis: sure ? now() + sure * 6e4 : 0 } }, null, chatId), m => toast("⚠️ " + m)); }
   if ("sessizmenu" in d) { S.sessizMenu = !S.sessizMenu; return render(); }
   if (d.sessiz) { const id = S.chatOpen, v = d.sessiz; S.sessizMenu = false;
-    if (v === "kaldir") { delete S.sessiz[id]; render(); return dene(() => API.sessizAyarla(id, false), "🔔 Sohbet sesi açıldı"); }
+    if (v === "kaldir") { delete S.sessiz[id]; render(); return dene(() => API.sessizAyarla(id, false), "🔔 Bu sohbetin bildirimleri açıldı"); }
     const dk = +v, bitis = dk ? new Date(now() + dk * 6e4).toISOString() : null; S.sessiz[id] = dk ? now() + dk * 6e4 : Infinity; render();
-    return dene(() => API.sessizAyarla(id, bitis), "🔕 Sohbet sessize alındı"); }
+    return dene(() => API.sessizAyarla(id, bitis), "🔕 Sohbet sessize alındı, bildirim gelmeyecek"); }
   if ("menusil" in d) { S.menu = "sil"; return render(); }
   if ("menuiptal" in d) { S.menu = null; S.secili = null; return render(); }
   if ("bendensil" in d) { const id = S.secili; S.gizli.add(id); S.secili = null; S.menu = null; render(); return dene(() => API.bendenSil(id), "Mesaj senden silindi"); }
@@ -784,7 +813,7 @@ async function degisti(tablo, p) {
       if (S.yaziyor[c.id]?.uid === m.from) delete S.yaziyor[c.id];
       if (m.from !== S.user.id) {
         if (S.chatOpen === c.id && document.visibilityState === "visible") { c.okuma[S.user.id] = now(); API.okundu(c.id).catch(() => {}); S.scrollBottom = window.innerHeight + scrollY >= document.body.scrollHeight - 200; }
-        else toast(((m.bahs || []).includes(S.user.id) ? "@ " + uye(m.from).ad + " senden bahsetti" : "💬 " + chatAd(c) + ": " + onizle(m).replace(/&[^;]+;/g, "")));
+        else toast((m.herkes ? "📣 " + uye(m.from).ad + " herkesten bahsetti" : (m.bahs || []).includes(S.user.id) ? "@ " + uye(m.from).ad + " senden bahsetti" : "💬 " + chatAd(c) + ": " + onizle(m).replace(/&[^;]+;/g, "")));
       }
     }
     return render();
