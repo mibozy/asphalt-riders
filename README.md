@@ -7,6 +7,7 @@ Ankara merkezli ASPHALT RIDERS motosiklet grubunun üye uygulaması (PWA).
 - `js/sifre.js` → uçtan uca şifreleme (ECDH P-256 + AES-GCM)
 - `js/bildirim.js` → OneSignal web push
 - `supabase/schema.sql` → veritabanı şeması
+- `version.json` → her güncellemede numarayı artır (telefonlardaki eski sürümü yeniler)
 
 Yayın: GitHub Pages → https://mibozy.github.io/asphalt-riders/ (main dalına her gönderimde otomatik).
 
