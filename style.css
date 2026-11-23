@@ -204,3 +204,17 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 .unr.bahs{background:#ffd36e;color:#111}
 .bilcard{border-color:var(--red-d)}
 .st .plus{border:2px solid var(--bg)}
+/* ===== v3 ===== */
+.ring{background:var(--line)}
+.ring.new{background:conic-gradient(from 210deg,#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75)}
+.ring.seen{background:#4a4a52}
+@media (prefers-reduced-motion:no-preference){.ring.new{animation:halka 3s linear infinite}.ring.new .av{animation:halkaters 3s linear infinite}}
+@keyframes halka{to{transform:rotate(360deg)}}
+@keyframes halkaters{to{transform:rotate(-360deg)}}
+.hkhalka{display:inline-grid;place-items:center;border-radius:50%;padding:2px;flex-shrink:0;cursor:pointer}
+.hkhalka.yeni{background:conic-gradient(from 210deg,#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75)}
+.hkhalka.gorulmus{background:#4a4a52}
+.hkhalka .av{border:2px solid var(--panel)}
+.eylem{gap:8px;padding:12px}
+.sureler{display:flex;flex-wrap:wrap;gap:6px}
+.mtx.silindi{color:var(--muted);font-style:italic}

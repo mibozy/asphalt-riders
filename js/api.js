@@ -125,7 +125,11 @@ const API = (() => {
       return ok(await q).reverse();
     },
     async mesaj(id) { return ok(await sb.from("mesajlar").select("*").eq("id", id).maybeSingle()); },
-    async mesajGonder(chatId, sifreli, yanit, bahsedilen) { return ok(await sb.from("mesajlar").insert({ chat_id: chatId, sifreli, yanit: yanit || null, bahsedilen: bahsedilen || [] }).select().single()); },
+    async mesajGonder(chatId, sifreli, yanit, bahsedilen, silinme) { return ok(await sb.from("mesajlar").insert({ chat_id: chatId, sifreli, yanit: yanit || null, bahsedilen: bahsedilen || [], silinme: silinme || null }).select().single()); },
+    async mesajDuzenle(id, sifreli) { ok(await sb.from("mesajlar").update({ sifreli, duzenlendi: true, updated_at: new Date().toISOString() }).eq("id", id)); },
+    async herkestenSil(id) { ok(await sb.rpc("mesaj_herkesten_sil", { mid: id })); },
+    async bendenSil(id) { ok(await sb.from("gizlenen").upsert({ uid: benId, mesaj_id: id })); },
+    async gizlenenler() { return ok(await sb.from("gizlenen").select("mesaj_id")).map(x => x.mesaj_id); },
     async mesajGuncelle(id, sifreli) { ok(await sb.from("mesajlar").update({ sifreli, updated_at: new Date().toISOString() }).eq("id", id)); },
     async okundu(chatId) { ok(await sb.from("chat_uyeler").update({ son_okuma: new Date().toISOString() }).eq("chat_id", chatId).eq("uid", benId)); },
     async dmAc(uid) { return ok(await sb.rpc("dm_ac", { diger: uid })); },

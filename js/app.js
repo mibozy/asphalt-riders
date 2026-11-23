@@ -8,7 +8,9 @@ const YETKI_ADLARI = { duyuru: "Duyuru, etkinlik ve anket", uye: "Üye başvurul
 const S = { user:null, durum:"yukleniyor", tab:"sohbet", loginMode:"giris", err:"", bilgi:"", members:[], duyurular:[], etkinlikler:[], anketler:[],
   aidat:{aktif:false,tutar:0,odemeler:{}}, chats:[], hikayeler:[], tepki:{}, chatOpen:null, draft:{}, secili:null, yanit:null,
   ekMenu:false, kayit:null, yeniSohbet:false, hv:null, yaziyor:{}, canliKonum:{}, mesgul:false, online:[], fotoUrl:{}, epostam:"",
-  grupBilgi:false, hikayeMenu:false, fotoMenu:false, bahsHedef:null, oneri:[] };
+  grupBilgi:false, hikayeMenu:false, fotoMenu:false, bahsHedef:null, oneri:[], gizli:new Set(), menu:null, duzenle:null,
+  konumSec:null };
+const KONUM_SURELER = { anlik: [[15,"15 dk"],[60,"1 saat"],[480,"8 saat"],[1440,"24 saat"],[0,"Süresiz"]], canli: [[15,"15 dk"],[60,"1 saat"],[480,"8 saat"]] };
 
 const $ = s => document.querySelector(s);
 const esc = t => String(t ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -30,9 +32,17 @@ function toast(m) { const b = $("#toastBox"); b.innerHTML = `<div class="toast" 
 async function dene(f, basari) { try { await f(); if (basari) toast(basari); } catch (e) { toast("⚠️ " + (e.message || "Bir hata oldu")); console.error(e); } }
 
 /* Profil fotoğrafı ya da baş harfler. online: yetkililere yeşil nokta */
-function av(uid, sinif = "") {
+function av(uid, sinif = "", halka = false) {
   const m = uye(uid), url = m.foto && S.fotoUrl[m.foto], nokta = yonetici() && S.online.includes(uid) ? `<i class="cevrim" aria-label="Çevrimiçi"></i>` : "";
-  return `<span class="av ${sinif}">${url ? `<img src="${url}" alt="">` : ini(m.ad)}${nokta}</span>`;
+  const ic = `<span class="av ${sinif}">${url ? `<img src="${url}" alt="">` : ini(m.ad)}${nokta}</span>`;
+  if (!halka) return ic;
+  const h = hikayeDurum(uid);
+  return h ? `<span class="hkhalka ${h}" data-hk="${uid}" role="button" aria-label="${esc(m.ad)} hikayesi">${ic}</span>` : ic;
+}
+/* "yeni": görülmemiş hikaye var · "gorulmus": hepsi görülmüş · "": hikaye yok */
+function hikayeDurum(uid) {
+  const l = S.hikayeler.filter(h => h.uid === uid && now() - ms(h.ts) < 864e5); if (!l.length) return "";
+  return uid !== S.user.id && l.some(h => !h.goren.includes(S.user.id)) ? "yeni" : uid === S.user.id ? "yeni" : "gorulmus";
 }
 const siraRol = { kurucu: 0, yardimci: 1, uye: 2 };
 const uyeSirala = l => [...l].sort((a, b) => (siraRol[a.rol] - siraRol[b.rol]) || a.ad.localeCompare(b.ad, "tr"));
@@ -73,14 +83,16 @@ async function yukleSonMesajlar() {
 }
 async function hepsiniYukle() {
   await yukleUyeler();
-  await Promise.all([yukleDuyurular(), yukleEtkinlikler(), yukleAnketler(), yukleAidat(), yukleHikayeler(), yukleTepkiler(), yukleSohbetler(), API.epostam().then(e => S.epostam = e)]);
+  await Promise.all([yukleDuyurular(), yukleEtkinlikler(), yukleAnketler(), yukleAidat(), yukleHikayeler(), yukleTepkiler(), yukleSohbetler(), API.epostam().then(e => S.epostam = e), API.gizlenenler().then(l => S.gizli = new Set(l)).catch(() => {})]);
   await yukleSonMesajlar();
 }
 
 /* ======================= MESAJ ŞİFRELEME ======================= */
 async function mesajCoz(r) {
-  const c = await Sifre.coz(r.sifreli, S.user.id);
-  const m = { id:r.id, chat:r.chat_id, from:r.gonderen, ts:ms(r.created_at), reply:r.yanit, guncel:r.updated_at, bahs:r.bahsedilen || [] };
+  const c = r.silindi ? null : await Sifre.coz(r.sifreli, S.user.id);
+  const m = { id:r.id, chat:r.chat_id, from:r.gonderen, ts:ms(r.created_at), reply:r.yanit, guncel:r.updated_at, bahs:r.bahsedilen || [],
+    duzenlendi:!!r.duzenlendi, silinme: r.silinme ? ms(r.silinme) : 0 };
+  if (r.silindi) return { ...m, silindi:true, bahs:[] };
   if (!c) return { ...m, okunamaz:true };
   Object.assign(m, c.icerik); m._anahtar = c.anahtar;
   if (m.medya) medyaHazirla(m);
@@ -230,7 +242,7 @@ function uyelerView() {
     <div class="row"><button class="btn pri sm" data-onay="${m.id}">Onayla</button><button class="btn sm" data-red="${m.id}">Reddet</button></div></div>`).join("")}`:""}
   <h2>Üyeler</h2>
   ${onayli.map(m => { const y = m.yetkiler || {};
-    return `<div class="card"><div class="mem">${av(m.id)}<div class="info">
+    return `<div class="card"><div class="mem">${av(m.id, "", true)}<div class="info">
     <div class="row"><span class="ttl">${esc(m.ad)}</span>${m.rol!=="uye"?`<span class="chip ${m.rol==="kurucu"?"red":""}">${rolAd[m.rol]}</span>`:""}${m.susturuldu?`<span class="chip warn">🔇 Susturuldu</span>`:""}</div>
     <div class="meta">@${esc(m.username)} · ${esc(m.motor)} · <span class="plate">${esc(m.plaka)}</span></div>
     ${yonetici()?`<div class="meta">${esc(m.tel)}</div>`:""}</div></div>
@@ -284,10 +296,12 @@ function profilView() {
 /* ======================= SOHBET ======================= */
 const chatBul = id => S.chats.find(c => c.id === id);
 const chatAd = c => c.tip === "grup" ? (c.ad || "ASPHALT RIDERS") : uye(c.uyeler.find(x => x !== S.user.id) || S.user.id).ad;
-const okunmamis = c => c.mesajlar.filter(m => m.from !== S.user.id && m.ts > (c.okuma[S.user.id] || 0)).length;
+const gorunur = c => c.mesajlar.filter(m => !S.gizli.has(m.id) && !(m.silinme && m.silinme < now()));
+const konumBitti = m => m.konum && m.konum.bitis && m.konum.bitis < now();
+const okunmamis = c => gorunur(c).filter(m => m.from !== S.user.id && m.ts > (c.okuma[S.user.id] || 0)).length;
 const bahsVar = c => c.mesajlar.some(m => m.from !== S.user.id && m.ts > (c.okuma[S.user.id] || 0) && (m.bahs || []).includes(S.user.id));
 const benimChatler = () => S.chats.filter(c => c.uyeler.includes(S.user.id));
-const avHtml = c => c.tip === "grup" ? `<span class="av"><img src="${LOGO}" alt=""></span>` : av(c.uyeler.find(x => x !== S.user.id) || S.user.id);
+const avHtml = (c, halka) => c.tip === "grup" ? `<span class="av"><img src="${LOGO}" alt=""></span>` : av(c.uyeler.find(x => x !== S.user.id) || S.user.id, "", halka);
 const aktifHikayeler = () => S.hikayeler.filter(h => now() - ms(h.ts) < 864e5);
 const msgBul = id => chatBul(S.chatOpen)?.mesajlar.find(m => m.id === id);
 const yazabilir = c => c.tip !== "grup" || yetki("sohbet") || (!c.kapali && !S.user.susturuldu);
@@ -300,7 +314,9 @@ function metinHtml(t) {
 }
 function onizle(m, c) {
   const me = S.user.id, on = c ? (m.from === me ? "Sen: " : c.tip === "grup" ? uye(m.from).ad.split(" ")[0] + ": " : "") : "";
+  if (m.silindi) return esc(on + "🚫 Bu mesaj silindi");
   if (m.okunamaz) return esc(on + "🔒 Bu cihazda okunamıyor");
+  if (m.konum && konumBitti(m)) return esc(on + "📍 Konum süresi doldu");
   const t = (m.text || "").replace(/@([a-zA-Z0-9._]{3,20})/g, (h, u) => { const x = S.members.find(y => y.username === u.toLowerCase()); return x ? "@" + x.ad : h; });
   const ic = m.tur === "foto" ? "📷 Fotoğraf" : m.tur === "ses" ? "🎤 Sesli mesaj (" + sure(m.sn || 0) + ")" : m.konum ? (m.konum.dk ? "📍 Canlı konum" : "📍 Konum") : m.hikayeYaniti ? "↩ Hikayeye yanıt: " + t : t;
   return esc(on + (ic || ""));
@@ -308,13 +324,13 @@ function onizle(m, c) {
 
 function sohbetView() {
   const me = S.user.id, benim = aktifHikayeler().filter(h => h.uid === me), yeni = u => aktifHikayeler().some(h => h.uid === u && !h.goren.includes(me));
-  const sonTs = c => c.mesajlar.length ? c.mesajlar.at(-1).ts : 0;
-  const chats = benimChatler().filter(c => c.tip === "grup" || c.mesajlar.length).sort((a, b) => sonTs(b) - sonTs(a));
+  const sonTs = c => gorunur(c).at(-1)?.ts || 0;
+  const chats = benimChatler().filter(c => c.tip === "grup" || gorunur(c).length).sort((a, b) => sonTs(b) - sonTs(a));
   return `${Bildirim.sorulmadi() || Bildirim.iosEkleGerek() ? `<div class="card bilcard"><b>🔔 Bildirimleri aç</b><div class="meta">${Bildirim.iosEkleGerek() ? "iPhone'da bildirim almak için: Safari → Paylaş → <b>Ana Ekrana Ekle</b>, sonra uygulamayı ana ekrandan aç." : "Duyuru, etkinlik ve senden bahsedildiğinde haberin olsun."}</div>${Bildirim.iosEkleGerek() ? "" : `<button class="btn sm pri" id="bildirimAc">Aç</button>`}</div>` : ""}
   <div class="stories">
-    <div class="st">${benim.length?`<button class="ring" data-hk="${me}" aria-label="Hikayeni gör">${av(me)}</button>`:`<button class="ring" data-hikayemenu aria-label="Hikaye ekle">${av(me)}</button>`}
+    <div class="st">${benim.length?`<button class="ring new" data-hk="${me}" aria-label="Hikayeni gör">${av(me)}</button>`:`<button class="ring" data-hikayemenu aria-label="Hikaye ekle">${av(me)}</button>`}
       <button class="plus" data-hikayemenu aria-label="Hikaye ekle">+</button><small>Hikayen</small></div>
-    ${hikayeSirasi().map(u => `<div class="st"><button class="ring ${yeni(u)?"new":""}" data-hk="${u}" aria-label="${esc(uye(u).ad)} hikayesi">${av(u)}</button><small>${esc(uye(u).ad.split(" ")[0])}</small></div>`).join("")}
+    ${hikayeSirasi().map(u => `<div class="st"><button class="ring ${yeni(u)?"new":"seen"}" data-hk="${u}" aria-label="${esc(uye(u).ad)} hikayesi">${av(u)}</button><small>${esc(uye(u).ad.split(" ")[0])}</small></div>`).join("")}
   </div>
   ${S.hikayeMenu?`<div class="card"><div class="row"><b class="grow">Hikaye paylaş · 24 saat görünür</b><button class="icb" data-hikayemenu aria-label="Kapat">✕</button></div>
    <div class="ekm" style="grid-template-columns:repeat(3,1fr)"><label class="ekb"><span>🖼️</span>Galeri<input type="file" accept="image/*" class="hikayeIn" hidden></label>
@@ -323,7 +339,7 @@ function sohbetView() {
    <div class="meta">24 saat sonra fotoğraf sunucudan tamamen silinir.</div></div>`:""}
   <div class="row"><h2 class="grow">Sohbetler</h2><button class="btn sm" data-yeni>${S.yeniSohbet?"Vazgeç":"+ Yeni sohbet"}</button></div>
   ${S.yeniSohbet?`<div class="card"><b>Kiminle sohbet edeceksin?</b>${uyeSirala(S.members.filter(m => m.onay && m.id !== me)).map(m => `<button class="ci" data-dm="${m.id}">${av(m.id)}<span class="mid"><span class="nm">${esc(m.ad)}</span><span class="pv"><span>${esc(m.motor)}</span></span></span></button>`).join("")}</div>`:""}
-  <div class="clist">${chats.map(c => { const son = c.mesajlar.at(-1), n = okunmamis(c), yz = yaziyorKim(c);
+  <div class="clist">${chats.map(c => { const son = gorunur(c).at(-1), n = okunmamis(c), yz = yaziyorKim(c);
     return `<button class="ci" data-chat="${c.id}">${avHtml(c)}<span class="mid"><span class="nm">${esc(chatAd(c))}${c.tip==="grup"&&c.kapali?" 🔒":""}<small>${son?saat(son.ts):""}</small></span>
     <span class="pv">${yz?`<span class="typing">yazıyor...</span>`:`<span>${son?onizle(son, c):"Henüz mesaj yok"}</span>`}${bahsVar(c)?`<span class="unr bahs">@</span>`:""}${n?`<span class="unr">${n}</span>`:""}</span></span></button>`; }).join("")}</div>
   <div class="e2e">🔒 Tüm sohbetler uçtan uca şifreli</div>`;
@@ -339,21 +355,23 @@ function tik(m, c) {
 function balon(m, c) {
   const me = S.user.id, mine = m.from === me, r = m.reply && c.mesajlar.find(x => x.id === m.reply), k = m.konum, tp = S.tepki[m.id] || {}, vals = Object.values(tp);
   let ic;
-  if (m.okunamaz) ic = `<div class="mtx" style="color:var(--muted)">🔒 Bu mesaj başka bir cihaz için şifrelenmiş, burada okunamıyor.</div>`;
+  if (m.silindi) ic = `<div class="mtx silindi">🚫 ${mine ? "Bu mesajı sildin" : "Bu mesaj silindi"}</div>`;
+  else if (m.okunamaz) ic = `<div class="mtx" style="color:var(--muted)">🔒 Bu mesaj başka bir cihaz için şifrelenmiş, burada okunamıyor.</div>`;
   else ic = `
    ${r?`<div class="quote"><b>${r.from===me?"Sen":esc(uye(r.from).ad)}</b>${onizle(r)}</div>`:""}
    ${m.hikayeYaniti?`<div class="quote"><b>Hikayeye yanıt</b></div>`:""}
    ${m.tur==="foto"?(m.url?`<img class="mimg" src="${m.url}" alt="Fotoğraf">`:`<div class="meta">${m.medyaHata?"Fotoğraf açılamadı":"📷 Fotoğraf yükleniyor..."}</div>`):""}
    ${m.tur==="ses"?`<div class="voice"><button class="play" data-play="${m.id}" aria-label="Oynat" ${m.url?"":"disabled"}>▶</button><div class="wave"><i style="animation-duration:${m.sn||1}s"></i></div><span class="meta">${sure(m.sn||0)}</span></div>`:""}
-   ${k?`<div class="loc"><div class="map ${k.dk&&k.bitis>now()?"live":""}">📍</div><div><b>${k.dk?"Canlı konum":"Konum"}</b>
-     <div class="meta">${k.dk?(k.bitis>now()?Math.ceil((k.bitis-now())/6e4)+" dk kaldı · "+saat(m.guncel)+" güncellendi":"Sona erdi"):(+k.lat).toFixed(4)+", "+(+k.lng).toFixed(4)}</div>
+   ${k?(konumBitti(m)?`<div class="loc"><div class="map">📍</div><div><b>${k.dk?"Canlı konum":"Konum"}</b><div class="meta">Süresi doldu, konum gizlendi</div></div></div>`
+     :`<div class="loc"><div class="map ${k.dk?"live":""}">📍</div><div><b>${k.dk?"🔴 Canlı konum":"Konum"}</b>
+     <div class="meta">${k.bitis?kalanYazi(k.bitis)+(k.dk?" · "+saat(m.guncel)+" güncellendi":""):"Süresiz"}</div>
      <a href="https://www.google.com/maps?q=${+k.lat},${+k.lng}" target="_blank" rel="noopener">Haritada aç</a>
-     ${mine&&k.dk&&k.bitis>now()?` · <button class="btn sm" data-durdur="${m.id}">Durdur</button>`:""}</div></div>`:""}
+     ${mine&&k.dk?` · <button class="btn sm" data-durdur="${m.id}">Durdur</button>`:""}</div></div>`):""}
    ${m.text?`<div class="mtx">${metinHtml(m.text)}</div>`:""}`;
   const bahsBen = !mine && (m.bahs || []).includes(me);
   return `<div class="mrow ${mine?"me":""}" id="m${m.id}"><div class="bub ${S.secili===m.id?"sel":""} ${bahsBen?"bahsben":""}" data-msg="${m.id}">
    ${c.tip==="grup"&&!mine?`<div class="snd" style="color:${RENK[Math.max(0, S.members.findIndex(x => x.id === m.from)) % RENK.length]}">${esc(uye(m.from).ad)}</div>`:""}
-   ${ic}<div class="mt">${saat(m.ts)}${mine?tik(m, c):""}</div></div>
+   ${ic}<div class="mt">${m.duzenlendi&&!m.silindi?"düzenlendi · ":""}${saat(m.ts)}${mine?tik(m, c):""}</div></div>
    ${vals.length?`<span class="react">${[...new Set(vals)].join("")}${vals.length>1?" "+vals.length:""}</span>`:""}</div>`;
 }
 function chatView() {
@@ -361,12 +379,14 @@ function chatView() {
   const alt = yz ? `<small class="typing">${c.tip==="grup"?esc(uye(yz).ad.split(" ")[0])+" ":""}yazıyor...</small>` : `<small>${c.tip==="grup"?(c.kapali?"🔒 Grup kapalı · ":"")+c.uyeler.length+" üye · bilgi için dokun":"@"+esc(uye(c.uyeler.find(x => x !== me)).username||"")}</small>`;
   const y = S.yanit && msgBul(S.yanit), eksik = c.uyeler.filter(u => !uye(u).pubkey).length;
   let alt2;
-  if (!yazabilir(c)) alt2 = `<div class="note" style="text-align:center">${c.kapali?"🔒 Grup şu an kapalı. Sadece yöneticiler mesaj gönderebilir.":"🔇 Grupta mesaj gönderme yetkin kapatıldı."}</div>`;
+  if (!yazabilir(c)) alt2 = `${S.secili?eylemMenu(c):""}<div class="note" style="text-align:center">${c.kapali?"🔒 Grup şu an kapalı. Sadece yöneticiler mesaj gönderebilir.":"🔇 Grupta mesaj gönderme yetkin kapatıldı."}</div>`;
   else alt2 = `
-   ${S.secili?`<div class="emojis">${["👍","❤️","😂","😮","🙏","🔥"].map(x => `<button data-react="${x}">${x}</button>`).join("")}<span class="grow"></span><button class="btn sm" data-reply>↩ Yanıtla</button></div>`:""}
+   ${S.secili?eylemMenu(c):""}
+   ${S.duzenle?`<div class="quote row" style="margin:0;flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>✏️ Mesajı düzenliyorsun</b>${onizle(msgBul(S.duzenle)||{})}</span><button class="icb" data-duzenlex aria-label="Düzenlemeyi iptal et">✕</button></div>`:""}
+   ${S.konumSec?konumSecView():""}
    ${y?`<div class="quote row" style="margin:0;flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>${y.from===me?"Sen":esc(uye(y.from).ad)}</b>${onizle(y)}</span><button class="icb" data-yanitx aria-label="Yanıtı iptal et">✕</button></div>`:""}
    <div id="oneriler" class="oneriler"></div>
-   ${S.ekMenu?`<div class="ekm"><label class="ekb"><span>🖼️</span>Galeri<input type="file" accept="image/*" id="fotoIn" hidden></label><label class="ekb"><span>📷</span>Kamera<input type="file" accept="image/*" capture="environment" id="fotoIn2" hidden></label><button class="ekb" data-konum="0"><span>📍</span>Konum</button><button class="ekb" data-konum="15"><span>🔴</span>Canlı 15 dk</button><button class="ekb" data-konum="60"><span>🔴</span>Canlı 1 sa</button></div>`:""}
+   ${S.ekMenu?`<div class="ekm"><label class="ekb"><span>🖼️</span>Galeri<input type="file" accept="image/*" id="fotoIn" hidden></label><label class="ekb"><span>📷</span>Kamera<input type="file" accept="image/*" capture="environment" id="fotoIn2" hidden></label><button class="ekb" data-konumsec="anlik"><span>📍</span>Konum</button><button class="ekb" data-konumsec="canli"><span>🔴</span>Canlı konum</button></div>`:""}
    ${S.kayit?`<div class="crow"><span class="rec">Kaydediliyor <span id="recT">${sure((now()-S.kayit.bas)/1000)}</span></span><button class="btn sm" data-recx>İptal</button><button class="send" data-recok aria-label="Sesli mesajı gönder">➤</button></div>`
    :`<div class="crow"><button class="icb" data-ek aria-label="Ekle">${S.ekMenu?"✕":"+"}</button><input id="msgIn" placeholder="Mesaj yaz · @ ile bahset" autocomplete="off" value="${esc(dr)}"><button class="send" data-send aria-label="Gönder" ${dr.trim()?"":"hidden"}>➤</button><button class="send" data-mic aria-label="Sesli mesaj kaydet" ${dr.trim()?"hidden":""}>🎤</button></div>`}`;
   return `<header class="chead wrap"><button class="icb" data-back aria-label="Geri">←</button>${avHtml(c)}<span class="grow" ${c.tip==="grup"?'data-grupbilgi role="button" tabindex="0"':""} style="cursor:${c.tip==="grup"?"pointer":"default"}"><b>${esc(chatAd(c))}</b>${alt}</span></header>
@@ -374,9 +394,30 @@ function chatView() {
    ${c.tip==="grup"&&c.aciklama?`<div class="e2e" style="color:var(--fg);border-color:var(--line);background:var(--panel)">${esc(c.aciklama)}</div>`:""}
    ${!c.tam&&c.mesajlar.length>=20?`<button class="btn sm" style="align-self:center" data-eski>Önceki mesajları yükle</button>`:""}
    ${eksik?`<div class="e2e" style="color:var(--muted)">${eksik} üye uygulamayı henüz açmadığı için şimdilik mesajları göremez.</div>`:""}
-   ${c.mesajlar.map(m => balon(m, c)).join("")}</main>
+   ${gorunur(c).map(m => balon(m, c)).join("")}</main>
   ${S.bahsHedef?`<button class="bahsgit" data-bahsgit aria-label="Senden bahsedilen mesaja git">@</button>`:""}
   <div class="composer"><div class="cin wrap">${alt2}</div></div>`;
+}
+function kalanYazi(t) { const d = Math.ceil((t - now()) / 6e4); return d <= 0 ? "Süresi doldu" : d < 60 ? d + " dk sonra kaybolur" : Math.ceil(d / 60) + " saat sonra kaybolur"; }
+function eylemMenu(c) {
+  const m = msgBul(S.secili); if (!m) return "";
+  const mine = m.from === S.user.id, silinebilir = !m.silindi && !m.bekliyor && (mine || (c.tip === "grup" && yetki("sohbet")));
+  if (S.menu === "sil") return `<div class="card eylem"><b>Mesajı sil</b>
+    ${silinebilir?`<button class="btn" data-herkestensil>🗑️ Herkesten sil</button>`:""}
+    <button class="btn" data-bendensil>🙈 Benden sil</button><button class="btn sm" data-menuiptal>Vazgeç</button>
+    ${silinebilir&&!mine?`<div class="meta">Yönetici olarak bu üyenin mesajını herkesten silebilirsin.</div>`:""}</div>`;
+  if (m.silindi) return `<div class="emojis"><span class="grow"></span><button class="btn sm" data-menusil>🗑️ Sil</button></div>`;
+  const duzenlenebilir = mine && !m.okunamaz && m.text && !m.tur && !m.konum;
+  return `<div class="emojis">${["👍","❤️","😂","😮","🙏","🔥"].map(x => `<button data-react="${x}">${x}</button>`).join("")}</div>
+   <div class="row"><button class="btn sm" data-reply>↩ Yanıtla</button>${duzenlenebilir?`<button class="btn sm" data-duzenle>✏️ Düzenle</button>`:""}${m.text&&!m.okunamaz?`<button class="btn sm" data-kopyala>📋 Kopyala</button>`:""}<button class="btn sm" data-menusil>🗑️ Sil</button></div>`;
+}
+function konumSecView() {
+  const k = S.konumSec, sureler = KONUM_SURELER[k.tur];
+  return `<div class="card eylem"><div class="row"><b class="grow">${k.tur==="canli"?"🔴 Canlı konum paylaş":"📍 Konum paylaş"}</b><button class="icb" data-konumiptal aria-label="Kapat">✕</button></div>
+   <div class="seg" style="grid-template-columns:1fr 1fr"><button class="${k.tur==="anlik"?"on":""}" data-konumsec="anlik">Anlık konum</button><button class="${k.tur==="canli"?"on":""}" data-konumsec="canli">Canlı konum</button></div>
+   <div class="meta">${k.tur==="canli"?"Konumun bu süre boyunca uygulama açıkken güncellenir.":"Konum bu süre sonunda sohbetten ve sunucudan silinir."}</div>
+   <div class="sureler">${sureler.map(([dk, l]) => `<button class="ytk ${k.sure===dk?"on":""}" data-konumsure="${dk}">${l}</button>`).join("")}</div>
+   <button class="btn pri" data-konumgonder>Konumu gönder</button></div>`;
 }
 function grupBilgiView() {
   const c = chatBul(S.chatOpen), yt = yetki("sohbet");
@@ -438,7 +479,8 @@ async function gonderMsg(icerik, dosya, chatId = S.chatOpen) {
       const yol = await API.yukle("medya", Date.now() + "-" + Math.random().toString(36).slice(2), s.blob);
       paketIcerik.medya = { yol, iv: s.iv, tip: dosya.type }; medyaCache.set(yol, gecici.url); }
     const { paket } = await Sifre.sifrele(paketIcerik, alicilar(c), anahtar);
-    const r = await API.mesajGonder(chatId, paket, yanit, bahs);
+    const silinme = icerik.konum?.bitis ? new Date(icerik.konum.bitis).toISOString() : null;
+    const r = await API.mesajGonder(chatId, paket, yanit, bahs, silinme);
     const zaten = c.mesajlar.find(m => m.id === r.id);
     Object.assign(gecici, { id: r.id, ts: ms(r.created_at), bekliyor: false, medya: paketIcerik.medya, _anahtar: anahtar });
     if (zaten && zaten !== gecici) c.mesajlar.splice(c.mesajlar.indexOf(zaten), 1);
@@ -448,12 +490,21 @@ async function gonderMsg(icerik, dosya, chatId = S.chatOpen) {
   render();
 }
 
+async function mesajDuzenle(id, text) {
+  const c = chatBul(S.chatOpen), m = msgBul(id); S.duzenle = null;
+  if (!m || text === m.text) return render();
+  const eski = m.text; m.text = text; m.duzenlendi = true; render();
+  try { const { paket } = await Sifre.sifrele({ text, ...(m.hikayeYaniti ? { hikayeYaniti: true } : {}) }, alicilar(c)); await API.mesajDuzenle(id, paket); toast("Mesaj düzenlendi"); }
+  catch (e) { m.text = eski; render(); toast("⚠️ Düzenlenemedi: " + e.message); }
+}
+
 /* Canlı konum: uygulama açıkken her 30 sn güncellenir */
 function canliKonumBasla(m) {
   const c = chatBul(m.chat);
   const t = setInterval(() => {
     if (m.konum.bitis <= now()) { clearInterval(t); delete S.canliKonum[m.id]; return render(); }
     konumAl(async (lat, lng) => {
+      if (!S.canliKonum[m.id]) return;
       m.konum = { ...m.konum, lat, lng }; m.guncel = new Date().toISOString();
       const { paket } = await Sifre.sifrele({ konum: m.konum }, alicilar(c));
       API.mesajGuncelle(m.id, paket).catch(() => {});
@@ -467,9 +518,15 @@ async function canliKonumDurdur(m) {
   const { paket } = await Sifre.sifrele({ konum: m.konum }, alicilar(chatBul(m.chat)));
   await API.mesajGuncelle(m.id, paket); render();
 }
-function konumAl(cb, hata) {
-  if (!navigator.geolocation) return hata && hata();
-  navigator.geolocation.getCurrentPosition(p => cb(p.coords.latitude, p.coords.longitude), () => hata && hata(), { enableHighAccuracy: true, timeout: 10000 });
+function konumAl(cb, hata = () => {}) {
+  if (!navigator.geolocation) return hata("Bu cihaz veya tarayıcı konum paylaşmayı desteklemiyor.");
+  const ok = p => cb(p.coords.latitude, p.coords.longitude);
+  const yaz = e => hata(e.code === 1 ? "Konum izni kapalı. Telefon ayarlarından tarayıcıya / bu siteye konum izni ver." :
+    e.code === 3 ? "Konum zamanında alınamadı. Açık alana çıkıp tekrar dene." : "Konum alınamadı. Telefonun Konum (GPS) ayarı açık mı?");
+  navigator.geolocation.getCurrentPosition(ok, e => {
+    if (e.code === 1) return yaz(e);
+    navigator.geolocation.getCurrentPosition(ok, yaz, { enableHighAccuracy: false, timeout: 20000, maximumAge: 600000 });
+  }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
 }
 
 /* Sesli mesaj */
@@ -527,7 +584,7 @@ function hikayeKapat() { clearTimeout(S.hvT); S.hv = null; $("#storyBox").innerH
 /* ======================= OLAYLAR ======================= */
 document.addEventListener("click", e => {
   if (e.target.closest("a")) return;
-  const t = e.target.closest("button,[data-tab],[data-grupbilgi]"); if (!t) return; const d = t.dataset;
+  const t = e.target.closest("button,[data-tab],[data-grupbilgi],[data-hk],[data-msg]"); if (!t) return; const d = t.dataset;
   if (d.mode) { S.loginMode = d.mode; S.err = ""; S.bilgi = ""; return render(); }
   if (S.durum === "bekliyor" && "yenile" in d) return baslat();
   if (t.id === "cikis") return dene(async () => { await Bildirim.cikis(); await API.cikis(); location.reload(); });
@@ -556,7 +613,7 @@ document.addEventListener("click", e => {
   if ("grupkapat" in d) { const c = chatBul(GRUP), yeni = !c.kapali;
     return dene(async () => { await API.grupAyarla(null, yeni); c.kapali = yeni; render(); }, yeni ? "Grup kapatıldı" : "Grup açıldı"); }
   if ("chat" in d) return openChat(d.chat);
-  if ("back" in d) { if (S.kayit) kayitBitir(false); S.chatOpen = null; S.grupBilgi = false; S.secili = null; S.yanit = null; S.ekMenu = false; S.bahsHedef = null; render(); return window.scrollTo(0, 0); }
+  if ("back" in d) { if (S.kayit) kayitBitir(false); S.konumSec = null; S.duzenle = null; S.menu = null; S.chatOpen = null; S.grupBilgi = false; S.secili = null; S.yanit = null; S.ekMenu = false; S.bahsHedef = null; render(); return window.scrollTo(0, 0); }
   if ("dm" in d) return dene(async () => { const id = await API.dmAc(d.dm); if (!chatBul(id)) await yukleSohbetler(); openChat(id); });
   if ("yeni" in d) { S.yeniSohbet = !S.yeniSohbet; return render(); }
   if ("eski" in d) return dene(eskiYukle);
@@ -565,13 +622,28 @@ document.addEventListener("click", e => {
   if (d.oneri) { const inp = $("#msgIn"), pos = inp.selectionStart ?? inp.value.length, once = inp.value.slice(0, pos).replace(/@[\p{L}0-9._]*$/u, "@" + d.oneri + " ");
     inp.value = once + inp.value.slice(pos); S.draft[S.chatOpen] = inp.value; $("#oneriler").innerHTML = ""; inp.focus(); inp.setSelectionRange(once.length, once.length);
     $("[data-send]").hidden = false; $("[data-mic]").hidden = true; return; }
-  if ("send" in d) { const v = (S.draft[S.chatOpen] || "").trim(); if (!v) return; S.draft[S.chatOpen] = ""; return gonderMsg({ text: v }); }
+  if ("send" in d) { const v = (S.draft[S.chatOpen] || "").trim(); if (!v) return; S.draft[S.chatOpen] = "";
+    if (S.duzenle) return mesajDuzenle(S.duzenle, v);
+    return gonderMsg({ text: v }); }
   if ("mic" in d) return kayitBasla();
   if ("recx" in d) return kayitBitir(false);
   if ("recok" in d) return kayitBitir(true);
   if ("ek" in d) { S.ekMenu = !S.ekMenu; return render(); }
-  if ("konum" in d) { const dk = +d.konum, chatId = S.chatOpen; S.ekMenu = false; render(); toast("Konum alınıyor...");
-    return konumAl((lat, lng) => gonderMsg({ konum: { lat, lng, dk, bitis: dk ? now() + dk * 6e4 : 0 } }, null, chatId), () => toast("Konum izni verilmedi.")); }
+  if (d.konumsec) { S.ekMenu = false; S.konumSec = { tur: d.konumsec, sure: d.konumsec === "canli" ? 15 : 60 }; return render(); }
+  if (d.konumsure) { S.konumSec.sure = +d.konumsure; return render(); }
+  if ("konumiptal" in d) { S.konumSec = null; return render(); }
+  if ("konumgonder" in d) { const { tur, sure } = S.konumSec, chatId = S.chatOpen; S.konumSec = null; render(); toast("📍 Konum alınıyor...");
+    return konumAl((lat, lng) => gonderMsg({ konum: { lat, lng, dk: tur === "canli" ? sure : 0, sure, bitis: sure ? now() + sure * 6e4 : 0 } }, null, chatId), m => toast("⚠️ " + m)); }
+  if ("menusil" in d) { S.menu = "sil"; return render(); }
+  if ("menuiptal" in d) { S.menu = null; S.secili = null; return render(); }
+  if ("bendensil" in d) { const id = S.secili; S.gizli.add(id); S.secili = null; S.menu = null; render(); return dene(() => API.bendenSil(id), "Mesaj senden silindi"); }
+  if ("herkestensil" in d) { const m = msgBul(S.secili); S.secili = null; S.menu = null;
+    return dene(async () => { await API.herkestenSil(m.id); if (m.medya && m.from === me) API.dosyaSil("medya", [m.medya.yol]).catch(() => {});
+      clearInterval(S.canliKonum[m.id]); delete S.canliKonum[m.id]; Object.assign(m, { silindi: true, text: "", tur: null, konum: null, medya: null, url: null }); delete S.tepki[m.id]; render(); }, "Mesaj herkesten silindi"); }
+  if ("duzenle" in d) { const m = msgBul(S.secili); S.duzenle = m.id; S.draft[S.chatOpen] = m.text; S.secili = null; render(); const i = $("#msgIn"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } return; }
+  if ("duzenlex" in d) { S.duzenle = null; S.draft[S.chatOpen] = ""; return render(); }
+  if ("kopyala" in d) { const m = msgBul(S.secili); S.secili = null; render();
+    return navigator.clipboard?.writeText(m.text).then(() => toast("Kopyalandı"), () => toast("Kopyalanamadı")); }
   if ("react" in d) { const m = msgBul(S.secili), tp = S.tepki[m.id] ||= {}, yeni = tp[me] === d.react ? null : d.react;
     if (yeni) tp[me] = yeni; else delete tp[me]; S.secili = null; render(); return dene(() => API.tepki(m.id, m.chat, yeni)); }
   if ("reply" in d) { S.yanit = S.secili; S.secili = null; render(); return $("#msgIn") && $("#msgIn").focus(); }
@@ -579,7 +651,7 @@ document.addEventListener("click", e => {
   if ("play" in d) { const m = msgBul(+d.play), w = t.parentElement.querySelector(".wave"); w.classList.remove("playing"); void w.offsetWidth; w.classList.add("playing");
     if (m.url) new Audio(m.url).play().catch(() => toast("Ses çalınamadı")); return; }
   if ("durdur" in d) return dene(() => canliKonumDurdur(msgBul(+d.durdur)), "Canlı konum durduruldu");
-  if ("msg" in d) { const id = +d.msg; if (id < 0 || !yazabilir(chatBul(S.chatOpen))) return; S.secili = S.secili === id ? null : id; return render(); }
+  if ("msg" in d) { const id = +d.msg; if (id < 0) return; S.menu = null; S.secili = S.secili === id ? null : id; return render(); }
   if ("hk" in d) return hikayeAc(d.hk);
   if ("svx" in d) return hikayeKapat();
   if ("svp" in d) return hikayeGeri();
@@ -649,10 +721,11 @@ function gecikmeli(ad, f) { clearTimeout(tazeleT[ad]); tazeleT[ad] = setTimeout(
 async function degisti(tablo, p) {
   const r = p.new && Object.keys(p.new).length ? p.new : p.old;
   if (tablo === "mesajlar") {
-    if (p.eventType === "DELETE") return;
+    if (p.eventType === "DELETE") { const id = p.old?.id; S.chats.forEach(c => { const i = c.mesajlar.findIndex(x => x.id === id); if (i >= 0) c.mesajlar.splice(i, 1); }); return render(); }
     const c = chatBul(r.chat_id); if (!c) return gecikmeli("sohbet", async () => { await yukleSohbetler(); await yukleSonMesajlar(); });
     const m = await mesajCoz(r), i = c.mesajlar.findIndex(x => x.id === m.id);
-    if (i >= 0) { if (c.mesajlar[i].from === S.user.id && p.eventType === "INSERT") return; c.mesajlar[i] = { ...c.mesajlar[i], ...m }; }
+    if (i >= 0) { if (c.mesajlar[i].from === S.user.id && p.eventType === "INSERT") return;
+      const eskiM = c.mesajlar[i]; c.mesajlar[i] = m.silindi ? { ...m } : { ...eskiM, ...m }; if (m.silindi) delete S.tepki[m.id]; }
     else if (!c.mesajlar.some(x => x.bekliyor && x.from === m.from)) {
       c.mesajlar.push(m); c.mesajlar.sort((a, b) => a.id - b.id);
       if (S.yaziyor[c.id]?.uid === m.from) delete S.yaziyor[c.id];
@@ -666,6 +739,7 @@ async function degisti(tablo, p) {
   if (tablo === "chat_uyeler") { const c = chatBul(r.chat_id);
     if (c && p.eventType === "UPDATE" && r.uid) { c.okuma[r.uid] = ms(r.son_okuma); return render(); }
     return gecikmeli("sohbet", async () => { await yukleSohbetler(); await yukleSonMesajlar(); }); }
+  if (tablo === "hikayeler" && p.eventType === "INSERT" && r.uid && r.uid !== S.user.id) toast("📸 " + uye(r.uid).ad + " yeni hikaye paylaştı");
   if (tablo === "chats") { const c = chatBul(r.id); if (c && p.new) { c.aciklama = r.aciklama || ""; c.kapali = !!r.kapali; return render(); } return; }
   const harita = { tepkiler: yukleTepkiler, duyurular: yukleDuyurular, etkinlikler: yukleEtkinlikler, katilim: yukleEtkinlikler, anketler: yukleAnketler, oylar: yukleAnketler, hikayeler: yukleHikayeler, profiles: yukleUyeler };
   if (harita[tablo]) gecikmeli(tablo, harita[tablo]);
@@ -698,6 +772,6 @@ document.addEventListener("visibilitychange", () => {
   API.tazele();
   gecikmeli("hepsi", async () => { await hepsiniYukle(); if (S.chatOpen) { const c = chatBul(S.chatOpen); c.okuma[S.user.id] = now(); API.okundu(c.id).catch(() => {}); } });
 });
-setInterval(() => { if (S.durum === "hazir" && !S.chatOpen && S.tab === "sohbet") render(); }, 60000);
+setInterval(() => { if (S.durum === "hazir" && (S.chatOpen ? !document.activeElement?.matches("input,textarea") : S.tab === "sohbet")) render(); }, 30000);
 Bildirim.baslat().catch(() => {});
 baslat();
