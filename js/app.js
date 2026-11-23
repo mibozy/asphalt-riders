@@ -495,10 +495,11 @@ document.addEventListener("change", e => {
 });
 document.addEventListener("submit", async e => {
   e.preventDefault(); const f = e.target.id, v = id => $("#" + id).value.trim();
-  if (f === "fGiris") { S.mesgul = true; S.err = ""; render();
-    try { await API.giris(v("lu"), $("#lp").value); S.mesgul = false; return baslat(); } catch (er) { S.err = er.message; S.mesgul = false; return render(); } }
-  if (f === "fBasvuru") { S.mesgul = true; S.err = ""; render();
-    try { await API.kayit({ username: v("bu"), sifre: $("#bp").value, ad: v("bad"), motor: v("bm"), plaka: v("bpl").toLocaleUpperCase("tr"), tel: v("bt") }); S.mesgul = false; return baslat(); }
+  if (f === "fGiris") { const ku = v("lu"), sf = $("#lp").value; S.mesgul = true; S.err = ""; render();
+    try { await API.giris(ku, sf); S.mesgul = false; return baslat(); } catch (er) { S.err = er.message; S.mesgul = false; return render(); } }
+  if (f === "fBasvuru") { const bilgi = { username: v("bu"), sifre: $("#bp").value, ad: v("bad"), motor: v("bm"), plaka: v("bpl").toLocaleUpperCase("tr"), tel: v("bt") };
+    S.mesgul = true; S.err = ""; render();
+    try { await API.kayit(bilgi); S.mesgul = false; return baslat(); }
     catch (er) { S.err = er.message; S.mesgul = false; return render(); } }
   if (S.durum !== "hazir") return;
   if (f === "fDuyuru") { const baslik = v("db"), metin = v("dm");
